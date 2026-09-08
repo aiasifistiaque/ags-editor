@@ -14,15 +14,15 @@ export const CONTENT_FIELDS: Record<string, string[]> = {
 	'study-process': [...sectionHero, 'card', 'btnText', 'url'],
 	partners: ['content'],
 	'top-universities': ['content', 'name', 'subContent'],
-	'/home-countries': ['content', 'btnText'],
+	'/home-countries': ['section', 'content', 'btnText'],
 	'finder-teaser': ['content', 'name', 'subContent', 'list'],
 	'finder-teaser-matches': ['card'],
-	'video-section': [...cta, 'list'],
+	'video-section': ['section', ...cta, 'list'],
 	'photo-gallery': ['content', 'name', 'gallery'],
 	'why-ags': ['content', 'name', 'subContent', 'list', 'card'],
 	testimonials: ['content', 'name'],
 	'visit-us': [...sectionHero, 'card'],
-	cta: [...cta, 'list'],
+	cta: ['section', ...cta, 'list'],
 	'/about-hero': [...hero, 'description', 'card'],
 	'/about-story': ['section', 'content', 'description', 'card'],
 	'/about-mission': ['section', 'content', 'card'],
@@ -58,6 +58,8 @@ export const CONTENT_FIELDS: Record<string, string[]> = {
 export function contentCardFields(slug: string): string[] {
 	if (slug === 'finder-teaser-matches' || slug === '/apply-hero') return ['title', 'subTitle', 'description'];
 	if (slug === '/about-sister') return ['image', 'title', 'description'];
+	// Footer.tsx renders each office card's image alongside its title/description.
+	if (slug === 'footer-left') return ['image', 'title', 'description'];
 	return ['title', 'description'];
 }
 

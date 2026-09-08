@@ -241,31 +241,178 @@ export type HomepageCollection = {
 	label: string;
 	defaultLimit: number;
 	defaultName: string;
+	/**
+	 * Which Content field the frontend renders as this rail's <h2>.
+	 * TopUniversitiesSection uses `name`; CountriesCarousel uses `content`.
+	 */
+	headingField: 'name' | 'content';
 };
 
 export const HOMEPAGE_COLLECTIONS: HomepageCollection[] = [
 	{
 		resource: 'universities',
 		contentSlug: 'top-universities',
-		label: 'Homepage universities',
+		label: 'Partner Universities',
 		defaultLimit: 6,
 		defaultName: 'Top Universities We Work With',
+		headingField: 'name',
 	},
 	{
 		resource: 'countries',
 		contentSlug: '/home-countries',
-		label: 'Homepage countries',
+		label: 'Destinations',
 		defaultLimit: 8,
-		defaultName: 'Home Countries Carousel',
-	},
-	{
-		resource: 'courses',
-		contentSlug: '/home-courses',
-		label: 'Homepage courses',
-		defaultLimit: 6,
-		defaultName: 'Homepage Courses',
+		defaultName: 'Where Will\nYou Study?',
+		headingField: 'content',
 	},
 ];
+
+/**
+ * How each public page is composed, mirroring the corresponding component in
+ * `ags-frontend/src/components`. The order here is the order the site renders,
+ * and `prefix` is the fallback that catches any block added in Admin under the
+ * page's slug namespace that isn't listed explicitly.
+ */
+export type PageBlock =
+	// `cards: false` where the Content row's `card[]` is the page body rather
+	// than hero stat cards — /privacy and /terms share one row for both.
+	| { type: 'hero'; slug: string; cards?: boolean }
+	| { type: 'content'; slug: string }
+	| { type: 'collection'; resource: ResourceName; title?: string }
+	| { type: 'form'; slug: string; infoSlug?: string }
+	| { type: 'steps'; slug: string; title?: string }
+	| { type: 'legal'; slug: string };
+
+export type PageLayout = {
+	title: string;
+	prefix?: string;
+	blocks: PageBlock[];
+};
+
+export const PAGE_LAYOUTS: Record<string, PageLayout> = {
+	// AboutPage.tsx — hero, story, mission, timeline, team, offices, sister, CTA.
+	'/about': {
+		title: 'About AGS',
+		prefix: '/about-',
+		blocks: [
+			{ type: 'hero', slug: '/about-hero' },
+			{ type: 'content', slug: '/about-story' },
+			{ type: 'content', slug: '/about-mission' },
+			{ type: 'content', slug: '/about-timeline' },
+			{ type: 'content', slug: '/about-team' },
+			{ type: 'content', slug: '/about-offices' },
+			{ type: 'content', slug: '/about-sister' },
+			{ type: 'content', slug: '/about-cta' },
+		],
+	},
+	// ServicesPage.tsx — hero, the services list, the process block, CTA.
+	'/services': {
+		title: 'Our Services',
+		prefix: '/services-',
+		blocks: [
+			{ type: 'hero', slug: '/services-hero' },
+			{ type: 'collection', resource: 'services', title: 'What We Do' },
+			{ type: 'content', slug: '/services-process' },
+			{ type: 'content', slug: '/services-cta' },
+		],
+	},
+	'/countries': {
+		title: 'Study Destinations',
+		prefix: '/countries-',
+		blocks: [
+			{ type: 'hero', slug: '/countries-hero' },
+			{ type: 'collection', resource: 'countries', title: 'Choose Your Destination' },
+			{ type: 'content', slug: '/countries-cta' },
+		],
+	},
+	'/courses': {
+		title: 'Courses & Programmes',
+		prefix: '/courses-',
+		blocks: [
+			{ type: 'hero', slug: '/courses-hero' },
+			{ type: 'collection', resource: 'courses', title: 'Browse Courses' },
+		],
+	},
+	'/universities': {
+		title: 'Partner Universities',
+		prefix: '/university-',
+		blocks: [
+			{ type: 'hero', slug: '/university-hero' },
+			{ type: 'collection', resource: 'universities', title: 'Browse Universities' },
+		],
+	},
+	'/eligibility': {
+		title: 'Check Your Eligibility',
+		prefix: '/eligibility-',
+		blocks: [{ type: 'hero', slug: '/eligibility-hero' }],
+	},
+	// FinderPage.tsx renders one step at a time from `/finder-steps.card`;
+	// the result page's heading lives in `/finder-result-hero`.
+	'/finder': {
+		title: 'University Finder',
+		prefix: '/finder-',
+		blocks: [
+			{ type: 'steps', slug: '/finder-steps', title: 'Finder questions' },
+			{ type: 'hero', slug: '/finder-result-hero' },
+		],
+	},
+	'/success-stories': {
+		title: 'Success Stories',
+		prefix: '/success-stories-',
+		blocks: [
+			{ type: 'hero', slug: '/success-stories-hero' },
+			{ type: 'collection', resource: 'successstories', title: 'Student Stories' },
+			{ type: 'content', slug: '/success-stories-cta' },
+		],
+	},
+	'/blog': {
+		title: 'AGS Insights',
+		prefix: '/blog-',
+		blocks: [
+			{ type: 'hero', slug: '/blog-hero' },
+			{ type: 'collection', resource: 'blogposts', title: 'Latest Articles' },
+		],
+	},
+	'/faq': {
+		title: 'Frequently Asked Questions',
+		prefix: '/faq-',
+		blocks: [
+			{ type: 'hero', slug: '/faq-hero' },
+			{ type: 'collection', resource: 'faqs', title: 'Questions by Topic' },
+			{ type: 'content', slug: '/faq-cta' },
+		],
+	},
+	'/apply': {
+		title: 'Start Your Application',
+		prefix: '/apply-',
+		blocks: [
+			{ type: 'hero', slug: '/apply-hero' },
+			{ type: 'form', slug: '/apply-form-panel' },
+		],
+	},
+	'/contact': {
+		title: 'Contact AGS',
+		prefix: '/contact-',
+		blocks: [
+			{ type: 'hero', slug: '/contact-hero' },
+			{ type: 'form', slug: '/contact-form-panel', infoSlug: '/contact-info' },
+		],
+	},
+	'/privacy': {
+		title: 'Privacy Policy',
+		blocks: [
+			{ type: 'hero', slug: '/privacy', cards: false },
+			{ type: 'legal', slug: '/privacy' },
+		],
+	},
+	'/terms': {
+		title: 'Terms of Service',
+		blocks: [
+			{ type: 'hero', slug: '/terms-services', cards: false },
+			{ type: 'legal', slug: '/terms-services' },
+		],
+	},
+};
 
 export function emptyWorkspaceData(): WorkspaceData {
 	return Object.fromEntries(RESOURCE_NAMES.map((resource) => [resource, []])) as unknown as WorkspaceData;

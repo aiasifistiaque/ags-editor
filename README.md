@@ -15,7 +15,9 @@ Feature-complete and verified locally against the AGS backend: type-check, lint,
 
 The public frontend does not need to run for the visual editor to work.
 
-The preview is an editor-owned rendering of the content, not a pixel-for-pixel copy of every public-site page. Saving updates existing backend records. New homepage selection settings (especially `/home-courses`) affect the public website only when that frontend reads those settings; this project does not install that integration or change the frontend.
+The preview is an editor-owned rendering of the content. Since 2026-09-08 it mirrors the public site section by section: each page's composition is an explicit ordered block list (`PAGE_LAYOUTS` in `src/lib/resources.ts`, and `HomePreview` in `SitePreview.tsx` for the homepage) matching the corresponding component in `ags-frontend/src/components`, and the section markup and styling follow the storefront's own design. It is still an approximation of a live page, not a rendering of it — carousels are static, links are inert, and a section only shows what the CMS actually stores rather than the frontend's hardcoded fallbacks.
+
+Saving updates existing backend records.
 
 ## What can be edited
 
@@ -24,11 +26,12 @@ Image fields (including nested cards and image arrays) provide a shared photo-li
 - Edit CMS content blocks; browse and arrange banners, courses, services, countries, universities, success stories, blog posts, galleries, partners, reviews, team members, and FAQ groups.
 - All 15 public pages have a preview, including the sitewide top bar (the `/topbar` doc that backs the site's phone number and WhatsApp link), the logo and the footer.
 - The left sidebar's All content library exposes every loaded record, including records that are not placed on a preview page.
-- CMS drawer controls use the backend Content schema, filtered by the frontend section's actual field usage in `src/lib/content-fields.ts`. Nested cards are filtered too. Unused fields and unmapped content are hidden without deleting stored values.
+- CMS drawer controls use the backend Content schema, filtered by the frontend section's actual field usage in `src/lib/content-fields.ts`. Nested cards are filtered too. Unused fields and unmapped content are hidden without deleting stored values. That list is audited against the frontend's consumers — when a frontend section starts reading a new field, add it there in the same piece of work or it stays uneditable here.
 - Records from other APIs (including courses, banners, services, and universities) are read-only in the editor. Clicking them opens a priority list with drag/drop and move buttons. Update their data in Admin; the editor API rejects direct edits.
 - Image fields upload through the editor's own `/api/upload` route, which checks the session, rejects non-images and anything over 10 MB, then forwards to the backend's S3 upload. Pasting a URL still works, and gallery fields accept a multi-file upload that appends to the list.
 - Existing endpoint records can be reordered with drag handles; the order is persisted through their existing `priority` field.
-- Homepage courses, universities, and countries can be selected and ordered independently. Selection IDs are stored in the relevant Content document's existing `list` field. `/home-courses` is created on first save if needed; courses themselves continue to be created only from Admin.
+- Homepage universities and countries can be selected and ordered independently. Selection IDs are stored in the relevant Content document's existing `list` field (`top-universities` and `/home-countries`), both of which the public homepage reads. Courses themselves continue to be created only from Admin.
+- There is deliberately **no homepage courses rail**. `/home-courses` used to appear here, but the public homepage has no courses section, so it was editing a setting nothing consumed. Courses remain fully editable and re-orderable on the `/courses` page preview and in the All content library. If a home courses section is ever built on the frontend, add a `HOMEPAGE_COLLECTIONS` entry back in `src/lib/resources.ts`.
 
 ## Security model
 
