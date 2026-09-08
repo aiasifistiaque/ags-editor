@@ -87,7 +87,7 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 		setError('');
 		setDraft(null);
 		setSelection({ kind: 'record', resource, id });
-		setNotice(`Editing ${resource}`);
+		setNotice(resource === 'contents' ? 'Editing page content' : `Arranging ${resource}`);
 	};
 
 	const saveRecord = async (resource: ResourceName, id: string, updates: Record<string, unknown>) => {
@@ -237,7 +237,7 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 						{RESOURCE_NAMES.map((resource) => <button key={resource} type='button' className={`page-button ${activeResource === resource ? 'is-active' : ''}`} aria-current={activeResource === resource ? 'page' : undefined} onClick={() => { closePanel(); setActivePath(`/collections/${resource}`); setNotice(`${RESOURCE_CONFIGS[resource].label} ready`); }}><span>{RESOURCE_CONFIGS[resource].label}</span><small>{data[resource].length}</small></button>)}
 					</div>
 				</nav>
-				<p className='page-sidebar-note'><b>Editing:</b> hover any outlined area to see its slug. Click it to open all fields. Drag ⠿ on collection cards to change priority.</p>
+				<p className='page-sidebar-note'><b>Editing:</b> hover to see the slug. Content blocks show only fields used on the website. Other collections open their priority list; their data is managed in Admin.</p>
 			</aside>
 
 			<section className='preview-stage' aria-label={`${activePage.label} page preview`}>
@@ -255,7 +255,7 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 				</div>
 			</section>
 
-			{selection ? <EditorPanel selection={selection} data={data} schemas={schemas} isSaving={isSaving} error={error} onClose={closePanel} onSaveRecord={saveRecord} onSaveHomepage={saveHomepage} onDraftChange={setDraft} /> : null}
+			{selection ? <EditorPanel selection={selection} data={data} schemas={schemas} isSaving={isSaving} error={error} onClose={closePanel} onSaveRecord={saveRecord} onSaveHomepage={saveHomepage} onDraftChange={setDraft} onReorder={reorder} /> : null}
 		</div>
 	</main>;
 }

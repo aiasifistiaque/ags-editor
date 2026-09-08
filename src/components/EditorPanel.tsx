@@ -3,6 +3,14 @@
 /* eslint-disable @next/next/no-img-element -- CMS URLs are arbitrary and this editor must preview them without a deployment-time host allowlist. */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { MediaPicker } from './MediaPicker';
+import { drawerSchema } from '@/lib/content-fields';
+
+const RichTextEditor = dynamic(() => import('./RichTextEditor'), {
+	ssr: false,
+	loading: () => <p role='status'>Loading rich text editor…</p>,
+});
 import {
 	isEditableField,
 	isResourceName,
@@ -32,6 +40,7 @@ type Props = {
 	onSaveRecord: (resource: ResourceName, id: string, updates: Record<string, unknown>) => Promise<void>;
 	onSaveHomepage: (definition: HomepageCollection, ids: string[]) => Promise<void>;
 	onDraftChange: (updates: Record<string, unknown> | null) => void;
+	onReorder: (resource: ResourceName, ids: string[]) => Promise<void>;
 };
 
 function cloneValue<T>(value: T): T {
@@ -52,7 +61,8 @@ function humanize(value: string): string {
 function inputType(schema: BackendFieldSchema, current: unknown): string {
 	if (schema.type === 'checkbox' || typeof current === 'boolean') return 'boolean';
 	if (schema.type === 'number' || typeof current === 'number') return 'number';
-	if (schema.type === 'textarea' || schema.type === 'editor') return 'textarea';
+	if (schema.type === 'editor') return 'editor';
+	if (schema.type === 'textarea') return 'textarea';
 	if (schema.type === 'select') return 'select';
 	if (schema.type === 'image') return 'image';
 	if (schema.type === 'date' || schema.type === 'date-only') return 'date';
@@ -137,6 +147,7 @@ function ImageControl({ value, onChange }: { value: unknown; onChange: (value: s
 	return <div className='image-control'>
 		<input type='text' inputMode='url' value={current} onChange={(event) => onChange(event.target.value)} placeholder='https://… or upload a file' />
 		<div className='image-control-actions'>
+			<MediaPicker label={current ? 'Change image / Photo library' : 'Choose from photo library'} onSelect={(urls) => onChange(urls[0])} />
 			<UploadButton label={current ? 'Replace image' : 'Upload image'} onUploaded={(urls) => onChange(urls[0])} />
 			{current ? <button type='button' className='link-button' onClick={() => onChange('')}>Remove</button> : null}
 		</div>
@@ -154,9 +165,13 @@ function StringListControl({ value, onChange, imageList }: { value: unknown; onC
 			placeholder={imageList ? 'One image URL per line' : 'One item per line'}
 		/>
 		{imageList ? <div className='image-control-actions'>
+			<MediaPicker label='Choose from photo library' multiple onSelect={(urls) => onChange([...list, ...urls])} />
 			<UploadButton label='Upload images' multiple onUploaded={(urls) => onChange([...list, ...urls])} />
 		</div> : null}
-		{imageList && list.length ? <div className='field-image-list'>{list.slice(0, 8).map((source, index) => <img key={`${source}-${index}`} src={source} alt='' />)}</div> : null}
+		{imageList && list.length ? <div className='field-gallery-items'>{list.map((source, index) => <div className='field-gallery-item' key={`${source}-${index}`}>
+			<img src={source} alt={`Gallery image ${index + 1}`} />
+			<div><MediaPicker label={`Change image ${index + 1}`} onSelect={(urls) => onChange(list.map((item, itemIndex) => itemIndex === index ? urls[0] : item))} /><button type='button' className='link-button' aria-label={`Remove image ${index + 1}`} onClick={() => onChange(list.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div>
+		</div>)}</div> : null}
 	</>;
 }
 
@@ -211,7 +226,8 @@ function NestedArrayControl({ schema, value, onChange }: { schema: BackendFieldS
 				{fields.map((field) => {
 					const type = inputType(field, item[field.name]);
 					return <label className='nested-field' key={field.name}><span>{field.label || humanize(field.name)}</span>
-						{type === 'textarea' ? <textarea rows={3} value={String(item[field.name] ?? '')} onChange={(event) => updateItem(index, field.name, event.target.value)} />
+						{type === 'editor' ? <RichTextEditor label={field.label || humanize(field.name)} value={String(item[field.name] ?? '')} onChange={(next) => updateItem(index, field.name, next)} />
+							: type === 'textarea' ? <textarea rows={3} value={String(item[field.name] ?? '')} onChange={(event) => updateItem(index, field.name, event.target.value)} />
 							: type === 'select' ? <select value={String(item[field.name] ?? '')} onChange={(event) => updateItem(index, field.name, event.target.value)}><option value=''>Select…</option>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
 							: type === 'image' ? <ImageControl value={item[field.name]} onChange={(next) => updateItem(index, field.name, next)} />
 							: <input type={type === 'number' ? 'number' : 'text'} value={String(item[field.name] ?? '')} onChange={(event) => updateItem(index, field.name, type === 'number' ? Number(event.target.value) : event.target.value)} />}
@@ -245,6 +261,7 @@ function FieldControl({
 	onChange: (value: unknown) => void;
 }) {
 	const type = inputType(schema, value);
+	if (type === 'editor') return <RichTextEditor label={schema.label || humanize(field)} value={String(value ?? '')} onChange={onChange} />;
 	if (type === 'boolean') return <label className='switch-control'><input type='checkbox' checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /><span /><b>{Boolean(value) ? 'Yes' : 'No'}</b></label>;
 	if (type === 'textarea') return <textarea value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} rows={6} placeholder={schema.placeholder} />;
 	if (type === 'number') return <input type='number' value={typeof value === 'number' ? value : String(value ?? '')} onChange={(event) => onChange(event.target.value === '' ? 0 : Number(event.target.value))} />;
@@ -289,7 +306,7 @@ function RecordEditor({
 	onSave: Props['onSaveRecord'];
 	onDraftChange: Props['onDraftChange'];
 }) {
-	const editableFields = useMemo(() => Object.entries(schema).filter(([key]) => isEditableField(resource, key)), [resource, schema]);
+	const editableFields = useMemo(() => Object.entries(drawerSchema(resource, record, schema)).filter(([key]) => isEditableField(resource, key)), [resource, record, schema]);
 	const [values, setValues] = useState<Record<string, unknown>>(() => Object.fromEntries(editableFields.map(([key]) => [key, cloneValue(record[key] ?? '')])));
 	const updates = useMemo(() => Object.fromEntries(editableFields.filter(([key]) => !sameValue(values[key], record[key] ?? '')).map(([key]) => [key, values[key]])), [editableFields, record, values]);
 	const isDirty = Object.keys(updates).length > 0;
@@ -314,7 +331,7 @@ function RecordEditor({
 						<FieldControl field={field} schema={fieldSchema} value={values[field]} data={data} onChange={(next) => setValues((current) => ({ ...current, [field]: next }))} />
 						{fieldSchema.helperText ? <small>{fieldSchema.helperText}</small> : null}
 					</label>
-				)) : <p className='panel-empty-copy'>This resource did not expose an editable field schema.</p>}
+				)) : <p className='panel-empty-copy'>This content is not used by an active frontend section. Its unused fields are hidden; manage it in Admin.</p>}
 			</div>
 			{error ? <p className='form-error' role='alert'>{error}</p> : null}
 			<div className='form-actions'><button className='secondary-button' type='button' onClick={onClose}>Cancel</button><button className='primary-button' type='submit' disabled={!isDirty || isSaving}>{isSaving ? 'Saving…' : 'Save changes'}</button></div>
@@ -379,11 +396,33 @@ function HomepageSelectionEditor({ definition, data, isSaving, error, onClose, o
 	</aside>;
 }
 
+function PriorityEditor({ resource, data, onClose, onReorder, error }: Pick<Props, 'data' | 'onClose' | 'onReorder' | 'error'> & { resource: ResourceName }) {
+	const records = prioritySorted(data[resource]);
+	const [dragged, setDragged] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	async function move(id: string, to: number) {
+		if (busy || to < 0 || to >= records.length) return;
+		const ids = records.map((record) => record._id);
+		const from = ids.indexOf(id);
+		if (from < 0 || from === to) return;
+		ids.splice(to, 0, ids.splice(from, 1)[0]);
+		setBusy(true);
+		try { await onReorder(resource, ids); } finally { setBusy(false); setDragged(null); }
+	}
+	return <aside className='editor-panel'>
+		<div className='panel-header'><div><span className='eyebrow'>DISPLAY ORDER</span><h2>{RESOURCE_CONFIGS[resource].label}</h2></div><button type='button' className='icon-button' aria-label='Close editor panel' onClick={onClose}>×</button></div>
+		<div className='selection-panel-body'><p className='selection-help'>These records come from {RESOURCE_CONFIGS[resource].label} in Admin. Their content is read-only here. Drag rows or use the arrows to save their priority order.</p>{error ? <p className='form-error' role='alert'>{error}</p> : null}
+			<div className='selected-order' aria-label='Priority order' aria-busy={busy}>{records.map((record, index) => <div key={record._id} className='selected-order-item' draggable={!busy} onDragStart={() => setDragged(record._id)} onDragEnd={() => setDragged(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (dragged) void move(dragged, index); }}><span>⠿</span><b>{index + 1}</b><strong>{recordLabel(resource, record)}</strong><button type='button' disabled={busy || index === 0} aria-label={`Move ${recordLabel(resource, record)} up`} onClick={() => void move(record._id, index - 1)}>↑</button><button type='button' disabled={busy || index === records.length - 1} aria-label={`Move ${recordLabel(resource, record)} down`} onClick={() => void move(record._id, index + 1)}>↓</button></div>)}</div>
+		</div>
+	</aside>;
+}
+
 export function EditorPanel(props: Props) {
 	if (props.selection.kind === 'homepage') {
 		return <HomepageSelectionEditor key={`${props.selection.definition.resource}:${props.data.contents.length}`} definition={props.selection.definition} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onSave={props.onSaveHomepage} />;
 	}
 	const selection = props.selection;
+	if (selection.resource !== 'contents') return <PriorityEditor key={selection.resource} resource={selection.resource} data={props.data} onClose={props.onClose} onReorder={props.onReorder} error={props.error} />;
 	const record = props.data[selection.resource].find((item) => item._id === selection.id);
 	if (!record) return <aside className='editor-panel panel-message'>That record is no longer available.</aside>;
 	return <RecordEditor key={`${selection.resource}:${record._id}:${record.updatedAt || ''}`} resource={selection.resource} record={record} schema={props.schemas[selection.resource]} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onSave={props.onSaveRecord} onDraftChange={props.onDraftChange} />;

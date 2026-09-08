@@ -3,6 +3,7 @@ import { getAuthorizedSession, isTrustedEditorRequest } from '@/lib/auth';
 import { backendUrl } from '@/lib/env';
 import { isResourceName } from '@/lib/resources';
 import { readResponse, validateUpdates, validDocumentId } from '@/lib/resource-api';
+import { CONTENT_FIELDS } from '@/lib/content-fields';
 
 type Context = { params: Promise<{ resource: string; id: string }> };
 
@@ -30,8 +31,18 @@ export async function PUT(request: Request, { params }: Context) {
 	if (!validDocumentId(id)) return NextResponse.json({ message: 'Invalid document ID.' }, { status: 400 });
 
 	const body = await request.json().catch(() => null);
+	if (resource !== 'contents') return NextResponse.json({ message: 'Edit this record in Admin. Only priority ordering is available in the visual editor.' }, { status: 403 });
 	const validated = await validateUpdates(resource, session.token, body);
 	if ('error' in validated) return NextResponse.json({ message: validated.error }, { status: 400 });
+	const existingResponse = await fetch(backendUrl(`contents/${id}`), { headers: { authorization: session.token }, cache: 'no-store' });
+	const existingBody = await readResponse(existingResponse);
+	if (!existingResponse.ok) return NextResponse.json(existingBody, { status: existingResponse.status });
+	const existing = (existingBody.doc || existingBody) as { slug?: string };
+	const allowed = new Set(CONTENT_FIELDS[existing.slug || ''] || []);
+	// These lists hold editor-managed homepage selections, not API record fields.
+	if (['/home-courses', '/home-countries', 'top-universities'].includes(existing.slug || '')) allowed.add('list');
+	const unused = Object.keys(validated.updates).filter((key) => !allowed.has(key));
+	if (unused.length) return NextResponse.json({ message: `Fields not used by this section: ${unused.join(', ')}` }, { status: 400 });
 
 	const response = await fetch(backendUrl(`${validated.resource}/${id}`), {
 		method: 'PUT',

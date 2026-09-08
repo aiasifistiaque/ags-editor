@@ -107,7 +107,7 @@ function EditableTarget({
 			<button
 				type='button'
 				className='editable-hit-area'
-				aria-label={`Edit ${label}`}
+				aria-label={`${resource === 'contents' ? 'Edit' : 'Arrange'} ${label}`}
 				onClick={(event) => {
 					event.preventDefault();
 					event.stopPropagation();
@@ -373,7 +373,7 @@ function CollectionSection({
 	return (
 		<section className='site-section section-tint collection-section'>
 			<div className='site-container'>
-				<div className='section-heading-row'><div><p className='site-eyebrow'>{RESOURCE_CONFIGS[resource].label}</p><h2>{title || `Explore ${RESOURCE_CONFIGS[resource].label}`}</h2><p className='site-description'>{subtitle || 'Click any outlined card to edit it. Drag the handle to change its priority.'}</p></div><span className='record-count'>{ordered.length} records</span></div>
+				<div className='section-heading-row'><div><p className='site-eyebrow'>{RESOURCE_CONFIGS[resource].label}</p><h2>{title || `Explore ${RESOURCE_CONFIGS[resource].label}`}</h2><p className='site-description'>{subtitle || (resource === 'contents' ? 'Click a content block to edit the fields used on the website.' : 'Content is managed in Admin. Click a card to arrange the priority list, or drag its handle.')}</p></div><span className='record-count'>{ordered.length} records</span></div>
 				{ordered.length ? (
 					<div className={`records-grid records-${resource}`}>
 						{ordered.map((record) => (
