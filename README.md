@@ -19,10 +19,13 @@ The preview is an editor-owned rendering of the content, not a pixel-for-pixel c
 
 ## What can be edited
 
-- CMS content blocks, banners, courses, services, countries, universities, success stories, blog posts, galleries, partners, reviews, team members, and FAQ groups.
+Image fields (including nested cards and image arrays) provide a shared photo-library picker. Browse/search uploaded photos, filter by folder, upload images up to 10 MB, or paste HTTP(S) URLs and local image paths. The gallery uses the same backend file collection as Admin. Inserting an image updates the draft; saving the record persists the field. Uploading itself immediately creates a shared file, even if you later cancel the record edit.
+
+- Edit CMS content blocks; browse and arrange banners, courses, services, countries, universities, success stories, blog posts, galleries, partners, reviews, team members, and FAQ groups.
 - All 15 public pages have a preview, including the sitewide top bar (the `/topbar` doc that backs the site's phone number and WhatsApp link), the logo and the footer.
 - The left sidebar's All content library exposes every loaded record, including records that are not placed on a preview page.
-- Field controls come from each backend resource's existing schema, including nested card arrays, string/image lists, booleans, selects, numbers, rich text, and relation fields.
+- CMS drawer controls use the backend Content schema, filtered by the frontend section's actual field usage in `src/lib/content-fields.ts`. Nested cards are filtered too. Unused fields and unmapped content are hidden without deleting stored values.
+- Records from other APIs (including courses, banners, services, and universities) are read-only in the editor. Clicking them opens a priority list with drag/drop and move buttons. Update their data in Admin; the editor API rejects direct edits.
 - Image fields upload through the editor's own `/api/upload` route, which checks the session, rejects non-images and anything over 10 MB, then forwards to the backend's S3 upload. Pasting a URL still works, and gallery fields accept a multi-file upload that appends to the list.
 - Existing endpoint records can be reordered with drag handles; the order is persisted through their existing `priority` field.
 - Homepage courses, universities, and countries can be selected and ordered independently. Selection IDs are stored in the relevant Content document's existing `list` field. `/home-courses` is created on first save if needed; courses themselves continue to be created only from Admin.
