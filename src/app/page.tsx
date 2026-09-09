@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { EditorShell } from '@/components/EditorShell';
-import { getAuthorizedSession } from '@/lib/auth';
+import { getAuthorizedSession, permissionMapFor } from '@/lib/auth';
 import { adminOrigin } from '@/lib/env';
 import { getWorkspaceData } from '@/lib/workspace-data';
 
@@ -18,6 +18,7 @@ export default async function Page() {
 			initialData={workspace.data}
 			initialSchemas={workspace.schemas}
 			initialErrors={workspace.errors}
+			permissions={permissionMapFor(session.admin)}
 		/>
 	);
 }

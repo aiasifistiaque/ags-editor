@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- CMS URLs are arbitrary and this editor must preview them without a deployment-time host allowlist. */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { MediaPicker } from './MediaPicker';
 import { drawerSchema } from '@/lib/content-fields';
@@ -17,10 +17,13 @@ import {
 	prioritySorted,
 	recordLabel,
 	recordSlug,
+	writableFormFields,
 	RESOURCE_CONFIGS,
 	type BackendFieldSchema,
+	type ConfigFormField,
 	type EditorRecord,
 	type HomepageCollection,
+	type ResourceFormConfig,
 	type ResourceName,
 	type ResourceSchema,
 	type WorkspaceData,
@@ -28,19 +31,24 @@ import {
 
 export type EditorSelection =
 	| { kind: 'record'; resource: ResourceName; id: string }
+	| { kind: 'create'; resource: ResourceName }
+	| { kind: 'priority'; resource: ResourceName }
 	| { kind: 'homepage'; definition: HomepageCollection };
 
 type Props = {
 	selection: EditorSelection;
 	data: WorkspaceData;
 	schemas: Record<ResourceName, ResourceSchema>;
+	formConfigs: Partial<Record<ResourceName, ResourceFormConfig>>;
 	isSaving: boolean;
 	error: string;
 	onClose: () => void;
 	onSaveRecord: (resource: ResourceName, id: string, updates: Record<string, unknown>) => Promise<void>;
+	onCreateRecord: (resource: ResourceName, values: Record<string, unknown>) => Promise<void>;
 	onSaveHomepage: (definition: HomepageCollection, ids: string[]) => Promise<void>;
 	onDraftChange: (updates: Record<string, unknown> | null) => void;
 	onReorder: (resource: ResourceName, ids: string[]) => Promise<void>;
+	onEditRecord: (resource: ResourceName, id: string) => void;
 };
 
 function cloneValue<T>(value: T): T {
@@ -51,6 +59,13 @@ function sameValue(left: unknown, right: unknown): boolean {
 	return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function isEmptyValue(value: unknown): boolean {
+	if (value === undefined || value === null) return true;
+	if (typeof value === 'string') return value.trim() === '';
+	if (Array.isArray(value)) return value.length === 0;
+	return false;
+}
+
 function humanize(value: string): string {
 	return value
 		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -58,19 +73,48 @@ function humanize(value: string): string {
 		.replace(/^./, (character) => character.toUpperCase());
 }
 
+/**
+ * Mirrors the slugifying each model with a pre-save slug generator already
+ * does (course/country/university/service/success-story). Blog posts have no
+ * generator (see the work order §4), so this button is the only way to get a
+ * valid slug for one.
+ */
+function slugify(text: string): string {
+	return text
+		.toLowerCase()
+		.trim()
+		.replace(/[^a-z0-9\s-]/g, '')
+		.replace(/\s+/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-|-$/g, '');
+}
+
+/**
+ * Schema type decides the control. The current value is a fallback only for
+ * a field with no recognized schema type — on the create path a new record
+ * has no values yet, so schema type must win, not the other way around.
+ */
 function inputType(schema: BackendFieldSchema, current: unknown): string {
-	if (schema.type === 'checkbox' || typeof current === 'boolean') return 'boolean';
-	if (schema.type === 'number' || typeof current === 'number') return 'number';
-	if (schema.type === 'editor') return 'editor';
-	if (schema.type === 'textarea') return 'textarea';
-	if (schema.type === 'select') return 'select';
-	if (schema.type === 'image') return 'image';
-	if (schema.type === 'date' || schema.type === 'date-only') return 'date';
-	if (schema.type === 'data-menu') return 'relation';
-	if (schema.type === 'data-tag') return 'relation-list';
-	if (schema.type === 'array-string' || schema.type === 'image-array') return 'string-list';
-	if (schema.type?.includes('array') || Array.isArray(current)) return 'array';
-	if (schema.type === 'seo' || (current && typeof current === 'object')) return 'json';
+	const type = schema.type;
+	if (type === 'checkbox') return 'boolean';
+	if (type === 'number') return 'number';
+	if (type === 'editor') return 'editor';
+	if (type === 'textarea') return 'textarea';
+	if (type === 'select') return 'select';
+	if (type === 'slug') return 'slug';
+	if (type === 'image') return 'image';
+	if (type === 'date' || type === 'date-only') return 'date';
+	if (type === 'data-menu') return 'relation';
+	if (type === 'data-tag') return 'relation-list';
+	if (type === 'array-string' || type === 'image-array' || type === 'tag') return 'string-list';
+	if (type === 'seo') return 'seo';
+	if (typeof type === 'string' && type.includes('array')) return 'array';
+	if (type === 'string' || type === 'input') return 'text';
+	// No recognized schema type — fall back to the current value's shape.
+	if (typeof current === 'boolean') return 'boolean';
+	if (typeof current === 'number') return 'number';
+	if (Array.isArray(current)) return 'array';
+	if (current && typeof current === 'object') return 'json';
 	return 'text';
 }
 
@@ -198,6 +242,105 @@ function JsonControl({ value, onChange }: { value: unknown; onChange: (value: un
 	</>;
 }
 
+/**
+ * Option source for a `data-menu`/`data-tag` field. `universities` is a
+ * `ResourceName`, so its options come straight from already-loaded
+ * workspace data; anything else (the legacy `destinations`/`packages`
+ * relations on `gallerys`/`reviews`) is fetched from the options proxy.
+ */
+function useRelationOptions(model: string | undefined, data: WorkspaceData): { options: { value: string; label: string }[]; loading: boolean } {
+	const [remote, setRemote] = useState<{ value: string; label: string }[]>([]);
+	const local = model && isResourceName(model);
+	const [loading, setLoading] = useState(() => Boolean(model) && !local);
+
+	useEffect(() => {
+		if (!model || local) return;
+		let cancelled = false;
+		fetch(`/api/resources/options/${model}`, { cache: 'no-store' })
+			.then((response) => response.json().catch(() => null))
+			.then((body) => {
+				if (cancelled) return;
+				setRemote(Array.isArray(body?.options) ? body.options : []);
+			})
+			.catch(() => { if (!cancelled) setRemote([]); })
+			.finally(() => { if (!cancelled) setLoading(false); });
+		return () => { cancelled = true; };
+	}, [model, local]);
+
+	if (!model) return { options: [], loading: false };
+	if (local) return { options: data[model].map((record) => ({ value: record._id, label: recordLabel(model, record) })), loading: false };
+	return { options: remote, loading };
+}
+
+function RelationControl({ model, value, data, onChange }: { model: string | undefined; value: unknown; data: WorkspaceData; onChange: (value: string) => void }) {
+	const { options, loading } = useRelationOptions(model, data);
+	const current = value && typeof value === 'object' && !Array.isArray(value) ? String((value as EditorRecord)._id || '') : String(value ?? '');
+	return <select value={current} onChange={(event) => onChange(event.target.value)}>
+		<option value=''>{loading ? 'Loading…' : 'Select…'}</option>
+		{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+	</select>;
+}
+
+function RelationListControl({ model, value, data, onChange }: { model: string | undefined; value: unknown; data: WorkspaceData; onChange: (value: string[]) => void }) {
+	const { options, loading } = useRelationOptions(model, data);
+	const ids = Array.isArray(value) ? value.map((item) => typeof item === 'object' && item ? String((item as EditorRecord)._id || '') : String(item)) : [];
+	return <div className='selection-list' aria-busy={loading}>
+		{options.map((option) => {
+			const checked = ids.includes(option.value);
+			return <label key={option.value} className={`selection-option ${checked ? 'is-checked' : ''}`}>
+				<input type='checkbox' checked={checked} onChange={() => onChange(checked ? ids.filter((id) => id !== option.value) : [...ids, option.value])} />
+				<span><strong>{option.label}</strong></span>
+			</label>;
+		})}
+		{!loading && !options.length ? <p className='panel-empty-copy'>No options available.</p> : null}
+	</div>;
+}
+
+const ROBOTS_MAX_IMAGE_PREVIEW = ['none', 'standard', 'large'];
+const SITEMAP_CHANGE_FREQUENCY = ['always', 'hourly', 'daily', 'weekly', 'monthly', 'yearly', 'never'];
+const SEO_OG_TYPES = ['website', 'article', 'book', 'profile'];
+const SEO_TWITTER_CARDS = ['summary', 'summary_large_image', 'app', 'player'];
+
+/**
+ * A dedicated subform for the `seo` sub-document spread into most models
+ * (see `models/seo/seo.schema.ts` in the backend). A raw JSON textarea for
+ * the site's whole SEO surface would be a regression from the admin, per the
+ * work order §4 — the core fields, `ogImage` through the photo library, and
+ * `keywords` as a list are all one keystroke away; `robots`/`sitemap` are
+ * collapsed behind a disclosure since they're rarely touched per-record.
+ */
+function SeoControl({ value, onChange }: { value: unknown; onChange: (value: Record<string, unknown>) => void }) {
+	const seo = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+	const robots = (seo.robots && typeof seo.robots === 'object' ? seo.robots : {}) as Record<string, unknown>;
+	const sitemap = (seo.sitemap && typeof seo.sitemap === 'object' ? seo.sitemap : {}) as Record<string, unknown>;
+	const set = (key: string, next: unknown) => onChange({ ...seo, [key]: next });
+	const setNested = (group: 'robots' | 'sitemap', key: string, next: unknown) => onChange({ ...seo, [group]: { ...(seo[group] as object || {}), [key]: next } });
+	const keywords = Array.isArray(seo.keywords) ? seo.keywords.filter((item): item is string => typeof item === 'string') : [];
+
+	return <div className='seo-control'>
+		<label className='nested-field'><span>Meta title</span><input type='text' value={String(seo.metaTitle ?? '')} onChange={(event) => set('metaTitle', event.target.value)} /></label>
+		<label className='nested-field'><span>Meta description</span><textarea rows={3} value={String(seo.metaDescription ?? '')} onChange={(event) => set('metaDescription', event.target.value)} /></label>
+		<label className='nested-field'><span>Canonical URL</span><input type='text' inputMode='url' value={String(seo.canonicalUrl ?? '')} onChange={(event) => set('canonicalUrl', event.target.value)} /></label>
+		<label className='nested-field'><span>Focus keyword</span><input type='text' value={String(seo.focusKeyword ?? '')} onChange={(event) => set('focusKeyword', event.target.value)} /></label>
+		<label className='nested-field'><span>Keywords</span><StringListControl value={keywords} onChange={(next) => set('keywords', next)} /></label>
+		<label className='nested-field'><span>Social image (og:image)</span><ImageControl value={seo.ogImage} onChange={(next) => set('ogImage', next)} /></label>
+		<label className='nested-field'><span>Social image alt text</span><input type='text' value={String(seo.ogImageAlt ?? '')} onChange={(event) => set('ogImageAlt', event.target.value)} /></label>
+		<label className='nested-field'><span>Open Graph title</span><input type='text' value={String(seo.ogTitle ?? '')} onChange={(event) => set('ogTitle', event.target.value)} /></label>
+		<label className='nested-field'><span>Open Graph description</span><textarea rows={2} value={String(seo.ogDescription ?? '')} onChange={(event) => set('ogDescription', event.target.value)} /></label>
+		<label className='nested-field'><span>Open Graph type</span><select value={String(seo.ogType ?? '')} onChange={(event) => set('ogType', event.target.value)}><option value=''>Page default</option>{SEO_OG_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+		<label className='nested-field'><span>Twitter card</span><select value={String(seo.twitterCard ?? '')} onChange={(event) => set('twitterCard', event.target.value)}><option value=''>Page default</option>{SEO_TWITTER_CARDS.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+		<details className='seo-advanced'>
+			<summary>Crawling &amp; sitemap</summary>
+			<label className='switch-control'><input type='checkbox' checked={robots.index !== false} onChange={(event) => setNested('robots', 'index', event.target.checked)} /><span /><b>Index this page</b></label>
+			<label className='switch-control'><input type='checkbox' checked={robots.follow !== false} onChange={(event) => setNested('robots', 'follow', event.target.checked)} /><span /><b>Follow links</b></label>
+			<label className='nested-field'><span>Max image preview</span><select value={String(robots.maxImagePreview ?? 'large')} onChange={(event) => setNested('robots', 'maxImagePreview', event.target.value)}>{ROBOTS_MAX_IMAGE_PREVIEW.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+			<label className='switch-control'><input type='checkbox' checked={sitemap.include !== false} onChange={(event) => setNested('sitemap', 'include', event.target.checked)} /><span /><b>Include in sitemap</b></label>
+			<label className='nested-field'><span>Sitemap priority (0–1)</span><input type='number' min={0} max={1} step={0.1} value={typeof sitemap.priority === 'number' ? sitemap.priority : 0.7} onChange={(event) => setNested('sitemap', 'priority', Number(event.target.value))} /></label>
+			<label className='nested-field'><span>Sitemap change frequency</span><select value={String(sitemap.changeFrequency ?? 'weekly')} onChange={(event) => setNested('sitemap', 'changeFrequency', event.target.value)}>{SITEMAP_CHANGE_FREQUENCY.map((freq) => <option key={freq} value={freq}>{freq}</option>)}</select></label>
+		</details>
+	</div>;
+}
+
 function nestedFields(schema: BackendFieldSchema, items: Array<Record<string, unknown>>): Array<BackendFieldSchema & { name: string }> {
 	const defined = schema.section?.dataModel;
 	if (Array.isArray(defined) && defined.length) return defined;
@@ -214,6 +357,8 @@ function NestedArrayControl({ schema, value, onChange }: { schema: BackendFieldS
 		? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
 		: [];
 	const fields = nestedFields(schema, items);
+	const itemTitle = schema.section?.display?.title || schema.section?.title;
+	const addLabel = schema.section?.addBtnText || '+ Add item';
 	const updateItem = (index: number, key: string, nextValue: unknown) => {
 		const next = cloneValue(items);
 		next[index] = { ...next[index], [key]: nextValue };
@@ -222,7 +367,7 @@ function NestedArrayControl({ schema, value, onChange }: { schema: BackendFieldS
 	return <div className='nested-items'>
 		{items.map((item, index) => (
 			<div className='nested-item' key={String(item._id || index)}>
-				<div className='nested-item-heading'><strong>Item {index + 1}</strong><button type='button' onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div>
+				<div className='nested-item-heading'><strong>{itemTitle ? `${itemTitle} ${index + 1}` : `Item ${index + 1}`}</strong><button type='button' onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div>
 				{fields.map((field) => {
 					const type = inputType(field, item[field.name]);
 					return <label className='nested-field' key={field.name}><span>{field.label || humanize(field.name)}</span>
@@ -235,7 +380,7 @@ function NestedArrayControl({ schema, value, onChange }: { schema: BackendFieldS
 				})}
 			</div>
 		))}
-		<button type='button' className='add-array-button' onClick={() => onChange([...items, Object.fromEntries(fields.map((field) => [field.name, '']))])}>+ Add item</button>
+		<button type='button' className='add-array-button' onClick={() => onChange([...items, Object.fromEntries(fields.map((field) => [field.name, '']))])}>{addLabel}</button>
 	</div>;
 }
 
@@ -252,12 +397,14 @@ function FieldControl({
 	schema,
 	value,
 	data,
+	titleValue,
 	onChange,
 }: {
 	field: string;
 	schema: BackendFieldSchema;
 	value: unknown;
 	data: WorkspaceData;
+	titleValue?: string;
 	onChange: (value: unknown) => void;
 }) {
 	const type = inputType(schema, value);
@@ -268,18 +415,15 @@ function FieldControl({
 	if (type === 'select') return <select value={String(value ?? '')} onChange={(event) => onChange(event.target.value)}><option value=''>Select…</option>{schema.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
 	if (type === 'image') return <ImageControl value={value} onChange={onChange} />;
 	if (type === 'date') return <input type='date' value={String(value ?? '').slice(0, 10)} onChange={(event) => onChange(event.target.value)} />;
-	if (type === 'relation') {
-		const model = schema.model;
-		const options = model && isResourceName(model) ? data[model] : [];
-		const current = value && typeof value === 'object' && !Array.isArray(value) ? String((value as EditorRecord)._id || '') : String(value ?? '');
-		return <select value={current} onChange={(event) => onChange(event.target.value)}><option value=''>Select…</option>{options.map((option) => <option key={option._id} value={option._id}>{recordLabel(model as ResourceName, option)}</option>)}</select>;
-	}
-	if (type === 'relation-list') {
-		const ids = Array.isArray(value) ? value.map((item) => typeof item === 'object' && item ? String((item as EditorRecord)._id || '') : String(item)) : [];
-		return <StringListControl value={ids} onChange={onChange} />;
-	}
+	if (type === 'slug') return <div className='slug-control'>
+		<input type='text' value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} placeholder={schema.placeholder} />
+		<button type='button' className='link-button' disabled={!titleValue} onClick={() => onChange(slugify(titleValue || ''))}>Generate from title</button>
+	</div>;
+	if (type === 'relation') return <RelationControl model={schema.model} value={value} data={data} onChange={onChange} />;
+	if (type === 'relation-list') return <RelationListControl model={schema.model} value={value} data={data} onChange={onChange} />;
 	if (type === 'string-list') return <StringListControl value={value} onChange={onChange} imageList={schema.type === 'image-array'} />;
 	if (type === 'array') return <ArrayControl schema={schema} value={value} onChange={onChange} />;
+	if (type === 'seo') return <SeoControl value={value} onChange={onChange} />;
 	if (type === 'json') return <JsonControl value={value} onChange={onChange} />;
 	const isUrl = field.toLowerCase().includes('url') || field.toLowerCase().includes('website');
 	return <input type={field === 'email' ? 'email' : 'text'} inputMode={isUrl ? 'url' : undefined} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} placeholder={schema.placeholder} />;
@@ -336,6 +480,182 @@ function RecordEditor({
 			{error ? <p className='form-error' role='alert'>{error}</p> : null}
 			<div className='form-actions'><button className='secondary-button' type='button' onClick={onClose}>Cancel</button><button className='primary-button' type='submit' disabled={!isDirty || isSaving}>{isSaving ? 'Saving…' : 'Save changes'}</button></div>
 		</form>
+	</aside>;
+}
+
+function asFieldSchema(field: ConfigFormField): BackendFieldSchema {
+	return {
+		label: field.label,
+		type: field.type,
+		isRequired: field.isRequired,
+		placeholder: field.placeholder,
+		helperText: field.helper,
+		options: field.options,
+		model: field.model,
+		hasImage: field.hasImage,
+		section: field.section,
+	};
+}
+
+type FormGroup = { title?: string; description?: string; collapsible?: boolean; fields: ConfigFormField[] };
+
+function groupFormFields(form: ConfigFormField[]): FormGroup[] {
+	const groups: FormGroup[] = [];
+	form.forEach((field) => {
+		if (field.sectionTitle || !groups.length) {
+			groups.push({ title: field.sectionTitle, description: field.description, collapsible: field.collapsible, fields: [] });
+		}
+		groups[groups.length - 1].fields.push(field);
+	});
+	return groups;
+}
+
+/**
+ * The config-driven create/edit form for every resource except `contents`
+ * (D1/D2 in the work order): renders the exact `form` the backend serves
+ * from that model's `config.ts` + `settings.ts`, so a field added there
+ * appears here with no editor change.
+ */
+function ConfigFormEditor({
+	resource,
+	mode,
+	record,
+	config,
+	data,
+	isSaving,
+	error,
+	onClose,
+	onCreate,
+	onSave,
+	onDraftChange,
+}: {
+	resource: ResourceName;
+	mode: 'create' | 'edit';
+	record?: EditorRecord;
+	config: ResourceFormConfig;
+	data: WorkspaceData;
+	isSaving: boolean;
+	error: string;
+	onClose: () => void;
+	onCreate: Props['onCreateRecord'];
+	onSave: Props['onSaveRecord'];
+	onDraftChange: Props['onDraftChange'];
+}) {
+	const groups = useMemo(() => groupFormFields(config.form), [config.form]);
+	const allowed = useMemo(() => writableFormFields(config), [config]);
+	const [editDoc, setEditDoc] = useState<EditorRecord | null>(null);
+	const [loadError, setLoadError] = useState('');
+	const [loading, setLoading] = useState(mode === 'edit');
+	const [requiredError, setRequiredError] = useState('');
+
+	// Create mode seeds each field's `value` (same as the admin's `onModalOpen`);
+	// `getValue` is a function and arrives unusable over the wire, so it's ignored.
+	const [values, setValues] = useState<Record<string, unknown>>(() =>
+		mode === 'create' ? Object.fromEntries(config.form.map((field) => [field.name, field.value ?? ''])) : {}
+	);
+
+	const recordId = record?._id;
+	useEffect(() => {
+		if (mode !== 'edit' || !recordId) return;
+		let cancelled = false;
+		fetch(`/api/resources/${resource}/edit/${recordId}`, { cache: 'no-store' })
+			.then((response) => response.json().catch(() => null))
+			.then((body: unknown) => {
+				if (cancelled) return;
+				// `GET <resource>/edit/:id` (`getDocumentToEditById.controller.ts`)
+				// responds with the raw document itself — unlike the list/create
+				// endpoints, it is not wrapped in `{ doc: ... }`.
+				const doc = body && typeof body === 'object' && typeof (body as { _id?: unknown })._id === 'string'
+					? body as EditorRecord
+					: null;
+				if (!doc) { setLoadError('This record could not be loaded for editing.'); return; }
+				setEditDoc(doc);
+				// Seed here rather than in a second effect watching `editDoc`: it's
+				// already inside this effect's async callback, not the effect body.
+				setValues(Object.fromEntries(config.form.map((field) => [field.name, cloneValue(doc[field.name] ?? '')])));
+			})
+			.catch(() => { if (!cancelled) setLoadError('This record could not be loaded for editing.'); })
+			.finally(() => { if (!cancelled) setLoading(false); });
+		return () => { cancelled = true; };
+	}, [mode, resource, recordId, config.form]);
+
+	const updates = useMemo(() => {
+		if (mode === 'create') {
+			return Object.fromEntries(Object.entries(values).filter(([key, value]) => allowed.has(key) && !isEmptyValue(value)));
+		}
+		if (!editDoc) return {};
+		return Object.fromEntries(
+			config.form
+				.filter((field) => allowed.has(field.name) && !sameValue(values[field.name], editDoc[field.name] ?? ''))
+				.map((field) => [field.name, values[field.name]])
+		);
+	}, [mode, values, allowed, editDoc, config.form]);
+	const isDirty = Object.keys(updates).length > 0;
+
+	// Live preview only makes sense in edit mode — create mode has no saved
+	// record in the workspace to overlay a draft onto.
+	useEffect(() => { if (mode === 'edit') onDraftChange(updates); }, [mode, updates, onDraftChange]);
+	useEffect(() => () => { if (mode === 'edit') onDraftChange(null); }, [mode, onDraftChange]);
+
+	const titleValue = String(values.title ?? values.name ?? '');
+	const missingRequired = () => config.form.filter((field) =>
+		field.isRequired && !field.isExcluded && !['checkbox', 'boolean'].includes(String(field.type)) && isEmptyValue(values[field.name])
+	);
+
+	function handleSubmit(event: FormEvent) {
+		event.preventDefault();
+		const missing = missingRequired();
+		if (missing.length) {
+			setRequiredError(`Fill in required field${missing.length === 1 ? '' : 's'}: ${missing.map((field) => field.label || humanize(field.name)).join(', ')}`);
+			return;
+		}
+		setRequiredError('');
+		if (mode === 'create') void onCreate(resource, updates);
+		else if (record) void onSave(resource, record._id, updates);
+	}
+
+	const heading = mode === 'create' ? (config.route?.button?.title || `Add ${RESOURCE_CONFIGS[resource].singular}`) : (record ? recordLabel(resource, record) : RESOURCE_CONFIGS[resource].singular);
+	const ready = mode === 'create' || (editDoc && !loading);
+
+	return <aside className='editor-panel'>
+		<div className='panel-header'>
+			<div><span className='eyebrow'>{RESOURCE_CONFIGS[resource].singular.toUpperCase()}</span><h2>{heading}</h2>{mode === 'edit' && record ? <code>{recordSlug(resource, record)}</code> : null}</div>
+			<button className='icon-button' type='button' onClick={onClose} aria-label='Close editor panel'>×</button>
+		</div>
+		{mode === 'edit' && loading ? <p className='panel-empty-copy' role='status'>Loading record…</p> : null}
+		{loadError ? <p className='form-error' role='alert'>{loadError}</p> : null}
+		{ready ? (
+			<form className='editor-form' onSubmit={handleSubmit}>
+				<div className='fields'>
+					{groups.map((group, index) => (
+						<fieldset className='form-section' key={index}>
+							{group.title ? <legend>{group.title}</legend> : null}
+							{group.description ? <p className='section-description'>{group.description}</p> : null}
+							{group.fields.map((field) => (
+								<label className='field' key={field.name}>
+									<span>{field.label || humanize(field.name)}{field.isRequired ? <em>Required</em> : null}</span>
+									<FieldControl
+										field={field.name}
+										schema={asFieldSchema(field)}
+										value={values[field.name]}
+										data={data}
+										titleValue={titleValue}
+										onChange={(next) => setValues((current) => ({ ...current, [field.name]: next }))}
+									/>
+									{field.helper ? <small>{field.helper}</small> : null}
+								</label>
+							))}
+						</fieldset>
+					))}
+				</div>
+				{requiredError ? <p className='form-error' role='alert'>{requiredError}</p> : null}
+				{error ? <p className='form-error' role='alert'>{error}</p> : null}
+				<div className='form-actions'>
+					<button className='secondary-button' type='button' onClick={onClose}>Cancel</button>
+					<button className='primary-button' type='submit' disabled={(mode === 'edit' && !isDirty) || isSaving}>{isSaving ? 'Saving…' : mode === 'create' ? 'Create' : 'Save changes'}</button>
+				</div>
+			</form>
+		) : null}
 	</aside>;
 }
 
@@ -396,7 +716,7 @@ function HomepageSelectionEditor({ definition, data, isSaving, error, onClose, o
 	</aside>;
 }
 
-function PriorityEditor({ resource, data, onClose, onReorder, error }: Pick<Props, 'data' | 'onClose' | 'onReorder' | 'error'> & { resource: ResourceName }) {
+function PriorityEditor({ resource, data, onClose, onReorder, onEdit, error }: Pick<Props, 'data' | 'onClose' | 'onReorder' | 'error'> & { resource: ResourceName; onEdit: Props['onEditRecord'] }) {
 	const records = prioritySorted(data[resource]);
 	const [dragged, setDragged] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -411,8 +731,8 @@ function PriorityEditor({ resource, data, onClose, onReorder, error }: Pick<Prop
 	}
 	return <aside className='editor-panel'>
 		<div className='panel-header'><div><span className='eyebrow'>DISPLAY ORDER</span><h2>{RESOURCE_CONFIGS[resource].label}</h2></div><button type='button' className='icon-button' aria-label='Close editor panel' onClick={onClose}>×</button></div>
-		<div className='selection-panel-body'><p className='selection-help'>These records come from {RESOURCE_CONFIGS[resource].label} in Admin. Their content is read-only here. Drag rows or use the arrows to save their priority order.</p>{error ? <p className='form-error' role='alert'>{error}</p> : null}
-			<div className='selected-order' aria-label='Priority order' aria-busy={busy}>{records.map((record, index) => <div key={record._id} className='selected-order-item' draggable={!busy} onDragStart={() => setDragged(record._id)} onDragEnd={() => setDragged(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (dragged) void move(dragged, index); }}><span>⠿</span><b>{index + 1}</b><strong>{recordLabel(resource, record)}</strong><button type='button' disabled={busy || index === 0} aria-label={`Move ${recordLabel(resource, record)} up`} onClick={() => void move(record._id, index - 1)}>↑</button><button type='button' disabled={busy || index === records.length - 1} aria-label={`Move ${recordLabel(resource, record)} down`} onClick={() => void move(record._id, index + 1)}>↓</button></div>)}</div>
+		<div className='selection-panel-body'><p className='selection-help'>Drag rows or use the arrows to save their priority order. Use Edit to change a record&apos;s content.</p>{error ? <p className='form-error' role='alert'>{error}</p> : null}
+			<div className='selected-order' aria-label='Priority order' aria-busy={busy}>{records.map((record, index) => <div key={record._id} className='selected-order-item' draggable={!busy} onDragStart={() => setDragged(record._id)} onDragEnd={() => setDragged(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (dragged) void move(dragged, index); }}><span>⠿</span><b>{index + 1}</b><strong>{recordLabel(resource, record)}</strong><button type='button' onClick={() => onEdit(resource, record._id)}>Edit</button><button type='button' disabled={busy || index === 0} aria-label={`Move ${recordLabel(resource, record)} up`} onClick={() => void move(record._id, index - 1)}>↑</button><button type='button' disabled={busy || index === records.length - 1} aria-label={`Move ${recordLabel(resource, record)} down`} onClick={() => void move(record._id, index + 1)}>↓</button></div>)}</div>
 		</div>
 	</aside>;
 }
@@ -421,9 +741,27 @@ export function EditorPanel(props: Props) {
 	if (props.selection.kind === 'homepage') {
 		return <HomepageSelectionEditor key={`${props.selection.definition.resource}:${props.data.contents.length}`} definition={props.selection.definition} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onSave={props.onSaveHomepage} />;
 	}
+
+	if (props.selection.kind === 'priority') {
+		return <PriorityEditor key={props.selection.resource} resource={props.selection.resource} data={props.data} onClose={props.onClose} onReorder={props.onReorder} onEdit={props.onEditRecord} error={props.error} />;
+	}
+
+	if (props.selection.kind === 'create') {
+		const resource = props.selection.resource;
+		const config = props.formConfigs[resource];
+		if (!config) return <aside className='editor-panel panel-message'>Loading form…</aside>;
+		return <ConfigFormEditor key={`create:${resource}`} resource={resource} mode='create' config={config} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onCreate={props.onCreateRecord} onSave={props.onSaveRecord} onDraftChange={props.onDraftChange} />;
+	}
+
 	const selection = props.selection;
-	if (selection.resource !== 'contents') return <PriorityEditor key={selection.resource} resource={selection.resource} data={props.data} onClose={props.onClose} onReorder={props.onReorder} error={props.error} />;
 	const record = props.data[selection.resource].find((item) => item._id === selection.id);
 	if (!record) return <aside className='editor-panel panel-message'>That record is no longer available.</aside>;
-	return <RecordEditor key={`${selection.resource}:${record._id}:${record.updatedAt || ''}`} resource={selection.resource} record={record} schema={props.schemas[selection.resource]} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onSave={props.onSaveRecord} onDraftChange={props.onDraftChange} />;
+
+	if (selection.resource === 'contents') {
+		return <RecordEditor key={`${selection.resource}:${record._id}:${record.updatedAt || ''}`} resource={selection.resource} record={record} schema={props.schemas[selection.resource]} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onSave={props.onSaveRecord} onDraftChange={props.onDraftChange} />;
+	}
+
+	const config = props.formConfigs[selection.resource];
+	if (!config) return <aside className='editor-panel panel-message'>Loading form…</aside>;
+	return <ConfigFormEditor key={`edit:${selection.resource}:${record._id}:${record.updatedAt || ''}`} resource={selection.resource} mode='edit' record={record} config={config} data={props.data} isSaving={props.isSaving} error={props.error} onClose={props.onClose} onCreate={props.onCreateRecord} onSave={props.onSaveRecord} onDraftChange={props.onDraftChange} />;
 }

@@ -20,6 +20,7 @@ import {
 	type HomepageCollection,
 	type PageBlock,
 	type ResourceName,
+	type ResourcePermissionMap,
 	type WorkspaceData,
 } from '@/lib/resources';
 
@@ -27,9 +28,12 @@ type Props = {
 	activePath: string;
 	data: WorkspaceData;
 	selectionKey: string;
+	permissions: ResourcePermissionMap;
 	onSelectRecord: (resource: ResourceName, id: string) => void;
 	onSelectHomepage: (definition: HomepageCollection) => void;
 	onReorder: (resource: ResourceName, orderedIds: string[]) => Promise<void>;
+	onCreateRecord: (resource: ResourceName) => void;
+	onOpenPriority: (resource: ResourceName) => void;
 };
 
 type SelectHandler = Props['onSelectRecord'];
@@ -144,7 +148,7 @@ function EditableTarget({
 			<button
 				type='button'
 				className='editable-hit-area'
-				aria-label={`${resource === 'contents' ? 'Edit' : 'Arrange'} ${label}`}
+				aria-label={`Edit ${label}`}
 				onClick={(event) => {
 					event.preventDefault();
 					event.stopPropagation();
@@ -765,6 +769,9 @@ function CollectionSection({
 	selectionKey: currentSelection,
 	onSelect,
 	onReorder,
+	onCreate,
+	onOpenPriority,
+	canCreate,
 	title,
 	eyebrow,
 	subtitle,
@@ -775,6 +782,9 @@ function CollectionSection({
 	selectionKey: string;
 	onSelect: SelectHandler;
 	onReorder: Props['onReorder'];
+	onCreate?: Props['onCreateRecord'];
+	onOpenPriority?: Props['onOpenPriority'];
+	canCreate?: boolean;
 	title?: string;
 	eyebrow?: string;
 	subtitle?: string;
@@ -782,6 +792,7 @@ function CollectionSection({
 }) {
 	const ordered = useMemo(() => prioritySorted(records), [records]);
 	const [dragged, setDragged] = useState<string | null>(null);
+	const addLabel = `+ Add ${RESOURCE_CONFIGS[resource].singular}`;
 	return (
 		<section className={`site-section ${tint ? 'section-tint' : ''} collection-section`}>
 			<div className='site-container'>
@@ -789,9 +800,13 @@ function CollectionSection({
 					<div>
 						<p className='label-tag'>{eyebrow || RESOURCE_CONFIGS[resource].label}</p>
 						<h2>{title || `Explore ${RESOURCE_CONFIGS[resource].label}`}</h2>
-						<p className='section-sub'>{subtitle || 'Content is managed in Admin. Click a card to arrange the priority list, or drag its handle.'}</p>
+						<p className='section-sub'>{subtitle || 'Click a card to edit it, drag its handle to reorder, or use Arrange order.'}</p>
 					</div>
-					<span className='record-count'>{ordered.length} records</span>
+					<div className='collection-actions'>
+						<span className='record-count'>{ordered.length} records</span>
+						{onOpenPriority ? <button type='button' className='secondary-button' onClick={() => onOpenPriority(resource)}>Arrange order</button> : null}
+						{onCreate && canCreate ? <button type='button' className='primary-button' onClick={() => onCreate(resource)}>{addLabel}</button> : null}
+					</div>
 				</div>
 				{ordered.length ? (
 					<div className={`records-grid records-${resource}`}>
@@ -821,7 +836,10 @@ function CollectionSection({
 							</EditableTarget>
 						))}
 					</div>
-				) : <div className='empty-collection'>No records yet. Add them from the admin panel, then reload this editor.</div>}
+				) : <div className='empty-collection'>
+					<p>No {RESOURCE_CONFIGS[resource].label.toLowerCase()} yet.</p>
+					{onCreate && canCreate ? <button type='button' className='primary-button' onClick={() => onCreate(resource)}>{addLabel}</button> : null}
+				</div>}
 			</div>
 		</section>
 	);
@@ -1089,7 +1107,7 @@ function LegalSection({ record, selectionKey: currentSelection, onSelect }: { re
 // ── page compositions ────────────────────────────────────────────────
 
 function HomePreview(props: Props) {
-	const { data, selectionKey: currentSelection, onSelectRecord, onSelectHomepage, onReorder } = props;
+	const { data, selectionKey: currentSelection, onSelectRecord, onSelectHomepage, onReorder, onCreateRecord, onOpenPriority, permissions } = props;
 	const bySlug = (slug: string) => data.contents.find((record) => record.slug === slug);
 	const universities = HOMEPAGE_COLLECTIONS.find((definition) => definition.resource === 'universities');
 	const countries = HOMEPAGE_COLLECTIONS.find((definition) => definition.resource === 'countries');
@@ -1113,6 +1131,9 @@ function HomePreview(props: Props) {
 			selectionKey={currentSelection}
 			onSelect={onSelectRecord}
 			onReorder={onReorder}
+			onCreate={onCreateRecord}
+			onOpenPriority={onOpenPriority}
+			canCreate={permissions.successstories.create}
 			eyebrow={value(bySlug('testimonials'), 'content', 'Student Stories')}
 			title={value(bySlug('testimonials'), 'name', 'Real Students, Real Results')}
 			subtitle='The three newest stories appear here. Click the heading block in All content to edit its wording.'
@@ -1123,7 +1144,7 @@ function HomePreview(props: Props) {
 }
 
 function StandardPagePreview(props: Props) {
-	const { activePath, data, selectionKey: currentSelection, onSelectRecord, onReorder } = props;
+	const { activePath, data, selectionKey: currentSelection, onSelectRecord, onReorder, onCreateRecord, onOpenPriority, permissions } = props;
 	const layout = PAGE_LAYOUTS[activePath];
 	if (!layout) return null;
 	const bySlug = (slug: string) => data.contents.find((record) => record.slug === slug);
@@ -1144,6 +1165,9 @@ function StandardPagePreview(props: Props) {
 					selectionKey={currentSelection}
 					onSelect={onSelectRecord}
 					onReorder={onReorder}
+					onCreate={onCreateRecord}
+					onOpenPriority={onOpenPriority}
+					canCreate={permissions[block.resource].create}
 					title={block.title || RESOURCE_CONFIGS[block.resource].label}
 					tint={index % 2 === 1}
 				/>;
@@ -1188,7 +1212,17 @@ export function SitePreview(props: Props) {
 	const collection = props.activePath.startsWith('/collections/') ? props.activePath.slice('/collections/'.length) : '';
 	if (isResourceName(collection)) {
 		return <div className='site-preview-document'>
-			<CollectionSection resource={collection} records={props.data[collection]} selectionKey={props.selectionKey} onSelect={props.onSelectRecord} onReorder={props.onReorder} subtitle='Every record in this collection is available here, including content that is not placed on a preview page.' />
+			<CollectionSection
+				resource={collection}
+				records={props.data[collection]}
+				selectionKey={props.selectionKey}
+				onSelect={props.onSelectRecord}
+				onReorder={props.onReorder}
+				onCreate={collection === 'contents' ? undefined : props.onCreateRecord}
+				onOpenPriority={props.onOpenPriority}
+				canCreate={collection !== 'contents' && props.permissions[collection].create}
+				subtitle='Every record in this collection is available here, including content that is not placed on a preview page.'
+			/>
 		</div>;
 	}
 	return (

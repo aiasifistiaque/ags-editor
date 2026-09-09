@@ -13,7 +13,11 @@ test('stats card controls omit unused image and subtitle without altering the sh
 	assert.deepEqual(result.card.section.dataModel.map((field) => field.name), ['title', 'description']);
 	assert.equal(schema.card.section.dataModel.length, 4);
 });
-test('records from separate APIs never expose editable data fields', () => {
+// Since the record-authoring work order, these resources ARE writable — just
+// not through the contents drawer. `CONTENT_FIELDS`/`drawerSchema` govern
+// `contents` alone; every other resource's create/edit form comes from
+// `get/config` instead (see `ConfigFormEditor` in EditorPanel.tsx).
+test('collection resources are not driven by the content drawer', () => {
 	for (const resource of ['courses', 'universities', 'services', 'banners', 'countries', 'faqs']) assert.deepEqual(drawerSchema(resource, { _id: 'x' }, schema), {});
 });
 test('unplaced content fails closed even if it has values', () => {

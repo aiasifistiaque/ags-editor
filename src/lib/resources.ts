@@ -44,6 +44,9 @@ export type BackendFieldSchema = {
 	hasImage?: boolean;
 	options?: SelectOption[];
 	section?: {
+		title?: string;
+		addBtnText?: string;
+		display?: { title?: string };
 		dataModel?: Array<BackendFieldSchema & { name: string }>;
 	};
 	[key: string]: unknown;
@@ -53,6 +56,109 @@ export type ResourceSchema = Record<string, BackendFieldSchema>;
 export type WorkspaceData = Record<ResourceName, EditorRecord[]>;
 export type WorkspaceSchemas = Record<ResourceName, ResourceSchema>;
 
+/**
+ * One entry of the `form` array returned by the backend's `GET
+ * /<resource>/get/config` — produced by `convertToFormFields.ts` from a
+ * model's `config.ts` layout and `settings.ts` schema. This is the layout
+ * contract for every resource except `contents` (see `ConfigFormEditor`).
+ */
+export type ConfigFormField = {
+	name: string;
+	label?: string;
+	type?: string;
+	isRequired?: boolean;
+	placeholder?: string;
+	helper?: string;
+	options?: SelectOption[];
+	model?: string;
+	dataModel?: unknown;
+	section?: {
+		title?: string;
+		addBtnText?: string;
+		display?: { title?: string };
+		dataModel?: Array<BackendFieldSchema & { name: string }>;
+	};
+	hasImage?: boolean;
+	limit?: number;
+	folder?: string;
+	/** Backend serializes this with `.toString()`; never `eval`d here — see D5 in the work order. Rendered unconditionally. */
+	renderCondition?: string;
+	value?: unknown;
+	/** Arrives as an unusable string over the wire (it's a function); ignored, same reasoning as `renderCondition`. */
+	getValue?: unknown;
+	isExcluded?: boolean;
+	sectionTitle?: string;
+	description?: string;
+	collapsible?: boolean;
+	endOfSection?: boolean;
+	span?: number;
+};
+
+export type ResourceFormConfig = {
+	form: ConfigFormField[];
+	schema: ResourceSchema;
+	route?: { title?: string; button?: { title?: string } };
+};
+
+/**
+ * Models proxyable through `/api/resources/options/[model]`, for `data-menu`/
+ * `data-tag` fields whose options aren't one of our 13 editor resources.
+ * `universities` is also a `ResourceName` (so `data[model]` already has it),
+ * but courses' `university` field and this route both need to work the same
+ * way; `destinations`/`packages` are legacy fields `gallerys`/`reviews` still
+ * carry from the travel-agency lineage (see the work order §4). Hardcoded
+ * rather than discovered, since the editor has no static view of every
+ * backend `config.ts`— extend this set if a 14th model relation appears.
+ */
+export const OPTION_MODELS = new Set(['universities', 'destinations', 'packages']);
+
+/**
+ * Precisely what the admin posts: the flattened set of `form[].name`, minus
+ * any field whose `isExcluded` is true (D3 in the work order). No
+ * `server-only` import here — both the server write guard
+ * (`resource-api.ts`) and the client form (`ConfigFormEditor`, to keep its
+ * submitted diff aligned with what the server will actually accept) need it.
+ */
+export function writableFormFields(config: ResourceFormConfig): Set<string> {
+	return new Set(config.form.filter((field) => !field.isExcluded && field.name).map((field) => field.name));
+}
+
+// `_id`/`id`/`__v` are Mongo/Mongoose internals; `code` is counter-generated
+// in a pre-save hook and appears in no form config; `createdAt`/`updatedAt`
+// are timestamps. None of the 13 resources' create forms should ever post
+// these, whichever allowlist governs the rest of the payload.
+export const BLOCKED_ON_CREATE_FIELDS = new Set(['_id', 'id', '__v', 'code', 'createdAt', 'updatedAt']);
+
+/**
+ * The decision logic behind `validateRecordWrite` in `resource-api.ts`,
+ * pulled out as a pure function so it's testable without a network fetch:
+ * that file imports `server-only` and can't be loaded outside a Next.js
+ * server context (including in `node --test`).
+ */
+export function invalidRecordWriteKeys(keys: string[], config: ResourceFormConfig, creating: boolean): string[] {
+	const allowed = writableFormFields(config);
+	return keys.filter((key) => !allowed.has(key) || (creating && BLOCKED_ON_CREATE_FIELDS.has(key)));
+}
+
+/** Per-resource create/edit/delete rights, computed once per page load from the admin's role (see `permissionMapFor` in `auth.ts`) and passed down so the shell can render buttons conditionally rather than discovering a role's limits by a 403. */
+export type ResourceAbility = { create: boolean; edit: boolean; delete: boolean };
+export type ResourcePermissionMap = Record<ResourceName, ResourceAbility>;
+
+/**
+ * The decision logic behind `can()` in `auth.ts`, pulled out as a pure
+ * function for the same reason as `invalidRecordWriteKeys` — `auth.ts`
+ * imports `server-only`.
+ */
+export function hasResourcePermission(
+	permissions: Iterable<string>,
+	action: 'create' | 'edit' | 'delete' | 'view',
+	resource: ResourceName,
+): boolean {
+	const set = permissions instanceof Set ? permissions : new Set(permissions);
+	if (set.has('*')) return true;
+	return set.has(`${action}-${RESOURCE_CONFIGS[resource].permission}`);
+}
+
 export type ResourceConfig = {
 	label: string;
 	singular: string;
@@ -60,6 +166,10 @@ export type ResourceConfig = {
 	subtitleField?: string;
 	imageField?: string;
 	reorderable: boolean;
+	/** Backend permission id, e.g. `create-blogposts`/`edit-blogposts`. Equal to the route path for all 13 resources — set explicitly rather than derived, so a future mismatch is visible. */
+	permission: string;
+	/** Whether this resource can be created from the editor. All 13 are today; exists so one can be opted out later without touching route code. */
+	creatable: boolean;
 };
 
 export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
@@ -70,6 +180,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'content',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'contents',
+		creatable: true,
 	},
 	banners: {
 		label: 'Hero banners',
@@ -78,6 +190,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'subContent',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'banners',
+		creatable: true,
 	},
 	courses: {
 		label: 'Courses',
@@ -85,6 +199,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		titleField: 'name',
 		subtitleField: 'universityName',
 		reorderable: true,
+		permission: 'courses',
+		creatable: true,
 	},
 	services: {
 		label: 'Services',
@@ -93,6 +209,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'description',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'services',
+		creatable: true,
 	},
 	countries: {
 		label: 'Countries',
@@ -101,6 +219,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'overviewSubContent',
 		imageField: 'coverImage',
 		reorderable: true,
+		permission: 'countries',
+		creatable: true,
 	},
 	universities: {
 		label: 'Universities',
@@ -109,6 +229,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'overviewSubContent',
 		imageField: 'coverImage',
 		reorderable: true,
+		permission: 'universities',
+		creatable: true,
 	},
 	successstories: {
 		label: 'Success stories',
@@ -117,6 +239,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'message',
 		imageField: 'coverImage',
 		reorderable: true,
+		permission: 'successstories',
+		creatable: true,
 	},
 	blogposts: {
 		label: 'Blog posts',
@@ -125,6 +249,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'excerpt',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'blogposts',
+		creatable: true,
 	},
 	gallerys: {
 		label: 'Gallery',
@@ -132,6 +258,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		titleField: 'name',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'gallerys',
+		creatable: true,
 	},
 	partners: {
 		label: 'Partners',
@@ -140,6 +268,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'description',
 		imageField: 'logo',
 		reorderable: true,
+		permission: 'partners',
+		creatable: true,
 	},
 	reviews: {
 		label: 'Reviews',
@@ -148,6 +278,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'reviewText',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'reviews',
+		creatable: true,
 	},
 	teams: {
 		label: 'Team members',
@@ -156,12 +288,16 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		subtitleField: 'designation',
 		imageField: 'image',
 		reorderable: true,
+		permission: 'teams',
+		creatable: true,
 	},
 	faqs: {
 		label: 'FAQs',
 		singular: 'FAQ group',
 		titleField: 'slug',
 		reorderable: true,
+		permission: 'faqs',
+		creatable: true,
 	},
 };
 
@@ -189,6 +325,10 @@ export const EDITOR_PAGES: EditorPage[] = [
 	{ label: 'Terms', path: '/terms', group: 'Resources' },
 ];
 
+// `contents`-only: the drawer's write guard. Every other resource's write
+// allowlist is derived from its `get/config` form instead (see
+// `writableFields` in resource-api.ts) — a blog post's `slug` is required on
+// create, for instance, which this fixed set would wrongly block.
 export const IMMUTABLE_FIELDS = new Set([
 	'_id',
 	'id',

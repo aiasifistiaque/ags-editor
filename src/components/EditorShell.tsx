@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { EditorPanel, type EditorSelection } from './EditorPanel';
 import { SitePreview } from './SitePreview';
 import {
@@ -9,7 +9,9 @@ import {
 	RESOURCE_CONFIGS,
 	type EditorRecord,
 	type HomepageCollection,
+	type ResourceFormConfig,
 	type ResourceName,
+	type ResourcePermissionMap,
 	type WorkspaceData,
 	type WorkspaceSchemas,
 } from '@/lib/resources';
@@ -20,6 +22,7 @@ type Props = {
 	initialData: WorkspaceData;
 	initialSchemas: WorkspaceSchemas;
 	initialErrors: Partial<Record<ResourceName, string>>;
+	permissions: ResourcePermissionMap;
 };
 
 type Viewport = 'desktop' | 'tablet' | 'mobile';
@@ -34,14 +37,17 @@ function messageFrom(body: Record<string, unknown>, fallback: string): string {
 
 function keyForSelection(selection: EditorSelection | null): string {
 	if (!selection) return '';
-	return selection.kind === 'record'
-		? `record:${selection.resource}:${selection.id}`
-		: `homepage:${selection.definition.resource}`;
+	if (selection.kind === 'record') return `record:${selection.resource}:${selection.id}`;
+	if (selection.kind === 'create') return `create:${selection.resource}`;
+	if (selection.kind === 'priority') return `priority:${selection.resource}`;
+	return `homepage:${selection.definition.resource}`;
 }
 
-export function EditorShell({ adminName, adminOrigin, initialData, initialSchemas, initialErrors }: Props) {
+export function EditorShell({ adminName, adminOrigin, initialData, initialSchemas, initialErrors, permissions }: Props) {
 	const [data, setData] = useState(initialData);
 	const [schemas, setSchemas] = useState(initialSchemas);
+	const [formConfigs, setFormConfigs] = useState<Partial<Record<ResourceName, ResourceFormConfig>>>({});
+	const loadingConfigs = useRef(new Set<ResourceName>());
 	const [activePath, setActivePath] = useState('/');
 	const [selection, setSelection] = useState<EditorSelection | null>(null);
 	const [draft, setDraft] = useState<Record<string, unknown> | null>(null);
@@ -60,7 +66,9 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 	const currentSelectionKey = useMemo(() => keyForSelection(selection), [selection]);
 
 	// The preview renders the record the panel is currently editing, unsaved values
-	// included, so typing in a field is visible on the page immediately.
+	// included, so typing in a field is visible on the page immediately. Only
+	// `record` selections (the contents drawer, or a ConfigFormEditor in edit
+	// mode) ever populate a draft — create mode has nothing in `data` to overlay.
 	const previewData = useMemo(() => {
 		if (!draft || !selection || selection.kind !== 'record') return data;
 		const { resource, id } = selection;
@@ -83,11 +91,51 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 		return true;
 	};
 
+	// Loaded lazily on first create/edit for a resource, and memoised for the
+	// session — the config changes when the backend redeploys, not per user
+	// action. `contents` never needs one; its drawer is schema-driven.
+	const ensureFormConfig = (resource: ResourceName) => {
+		if (resource === 'contents' || formConfigs[resource] || loadingConfigs.current.has(resource)) return;
+		loadingConfigs.current.add(resource);
+		fetch(`/api/resources/${resource}/config`, { cache: 'no-store' })
+			.then(async (response) => {
+				if (handleUnauthorized(response)) return null;
+				return jsonBody(response);
+			})
+			.then((body) => {
+				if (!body || !Array.isArray(body.form)) return;
+				const config: ResourceFormConfig = {
+					form: body.form as ResourceFormConfig['form'],
+					schema: (body.schema && typeof body.schema === 'object' ? body.schema : {}) as ResourceFormConfig['schema'],
+					route: body.route as ResourceFormConfig['route'],
+				};
+				setFormConfigs((current) => ({ ...current, [resource]: config }));
+			})
+			.catch(() => {})
+			.finally(() => { loadingConfigs.current.delete(resource); });
+	};
+
 	const selectRecord = (resource: ResourceName, id: string) => {
 		setError('');
 		setDraft(null);
 		setSelection({ kind: 'record', resource, id });
-		setNotice(resource === 'contents' ? 'Editing page content' : `Arranging ${resource}`);
+		setNotice(resource === 'contents' ? 'Editing page content' : `Editing this ${RESOURCE_CONFIGS[resource].singular.toLowerCase()}`);
+		ensureFormConfig(resource);
+	};
+
+	const openCreate = (resource: ResourceName) => {
+		setError('');
+		setDraft(null);
+		setSelection({ kind: 'create', resource });
+		setNotice(`Adding a new ${RESOURCE_CONFIGS[resource].singular.toLowerCase()}`);
+		ensureFormConfig(resource);
+	};
+
+	const openPriority = (resource: ResourceName) => {
+		setError('');
+		setDraft(null);
+		setSelection({ kind: 'priority', resource });
+		setNotice(`Arranging ${RESOURCE_CONFIGS[resource].label.toLowerCase()}`);
 	};
 
 	const saveRecord = async (resource: ResourceName, id: string, updates: Record<string, unknown>) => {
@@ -113,6 +161,29 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 			setNotice('Changes saved');
 		} catch (saveError) {
 			setError(saveError instanceof Error ? saveError.message : 'The record could not be saved.');
+		} finally {
+			setIsSaving(false);
+		}
+	};
+
+	const createRecord = async (resource: ResourceName, values: Record<string, unknown>) => {
+		setIsSaving(true);
+		setError('');
+		try {
+			const response = await fetch(`/api/resources/${resource}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(values),
+			});
+			if (handleUnauthorized(response)) return;
+			const body = await jsonBody(response);
+			if (!response.ok) throw new Error(messageFrom(body, 'The record could not be created.'));
+			const saved = body.doc && typeof body.doc === 'object' && !Array.isArray(body.doc) ? body.doc as EditorRecord : null;
+			if (saved) setData((current) => ({ ...current, [resource]: [...current[resource], saved] }));
+			setSelection(null);
+			setNotice(`${RESOURCE_CONFIGS[resource].singular} created`);
+		} catch (createError) {
+			setError(createError instanceof Error ? createError.message : 'The record could not be created.');
 		} finally {
 			setIsSaving(false);
 		}
@@ -237,7 +308,7 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 						{RESOURCE_NAMES.map((resource) => <button key={resource} type='button' className={`page-button ${activeResource === resource ? 'is-active' : ''}`} aria-current={activeResource === resource ? 'page' : undefined} onClick={() => { closePanel(); setActivePath(`/collections/${resource}`); setNotice(`${RESOURCE_CONFIGS[resource].label} ready`); }}><span>{RESOURCE_CONFIGS[resource].label}</span><small>{data[resource].length}</small></button>)}
 					</div>
 				</nav>
-				<p className='page-sidebar-note'><b>Editing:</b> hover to see the slug. Content blocks show only fields used on the website. Other collections open their priority list; their data is managed in Admin.</p>
+				<p className='page-sidebar-note'><b>Editing:</b> hover to see the slug. Content blocks show only fields used on the website. Click a record to edit it, or use Arrange order to reorder a collection.</p>
 			</aside>
 
 			<section className='preview-stage' aria-label={`${activePage.label} page preview`}>
@@ -247,15 +318,18 @@ export function EditorShell({ adminName, adminOrigin, initialData, initialSchema
 							activePath={activePath}
 							data={previewData}
 							selectionKey={currentSelectionKey}
+							permissions={permissions}
 							onSelectRecord={selectRecord}
 							onSelectHomepage={(definition) => { setError(''); setDraft(null); setSelection({ kind: 'homepage', definition }); setNotice(`Choosing ${definition.resource} for the homepage`); }}
 							onReorder={reorder}
+							onCreateRecord={openCreate}
+							onOpenPriority={openPriority}
 						/>
 					</div>
 				</div>
 			</section>
 
-			{selection ? <EditorPanel selection={selection} data={data} schemas={schemas} isSaving={isSaving} error={error} onClose={closePanel} onSaveRecord={saveRecord} onSaveHomepage={saveHomepage} onDraftChange={setDraft} onReorder={reorder} /> : null}
+			{selection ? <EditorPanel selection={selection} data={data} schemas={schemas} formConfigs={formConfigs} isSaving={isSaving} error={error} onClose={closePanel} onSaveRecord={saveRecord} onCreateRecord={createRecord} onSaveHomepage={saveHomepage} onDraftChange={setDraft} onReorder={reorder} onEditRecord={selectRecord} /> : null}
 		</div>
 	</main>;
 }

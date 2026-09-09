@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { backendUrl, editorOrigin } from './env';
 import { decryptSession, EDITOR_SESSION_COOKIE } from './session-crypto';
+import { hasResourcePermission, RESOURCE_NAMES, type ResourceName, type ResourcePermissionMap } from './resources';
 
 export type AdminSelf = {
 	_id: string;
@@ -21,6 +22,35 @@ export function hasContentAccess(admin: AdminSelf): boolean {
 	return permissions.includes('*') || (
 		permissions.includes('view-contents') && permissions.includes('edit-contents')
 	);
+}
+
+/**
+ * The session's bearer is the admin's own, so the backend already enforces
+ * `create-blogposts` etc. on every write — this is what stops the editor
+ * from rendering an "Add Blog Post" button (or the record edit form) for a
+ * role that cannot use it. `hasContentAccess` is still the session gate: an
+ * admin needs contents view+edit to enter the editor at all; these
+ * per-resource checks only widen what they can do once inside.
+ */
+export function permissionsFor(admin: AdminSelf): Set<string> {
+	return new Set(Array.isArray(admin.role?.permissions) ? admin.role.permissions : []);
+}
+
+export function can(
+	admin: AdminSelf,
+	action: 'create' | 'edit' | 'delete' | 'view',
+	resource: ResourceName,
+): boolean {
+	return hasResourcePermission(permissionsFor(admin), action, resource);
+}
+
+/** Computed once per page load and passed down to the client shell as plain data — `can()` itself needs `server-only` context it doesn't have. */
+export function permissionMapFor(admin: AdminSelf): ResourcePermissionMap {
+	return Object.fromEntries(RESOURCE_NAMES.map((resource) => [resource, {
+		create: can(admin, 'create', resource),
+		edit: can(admin, 'edit', resource),
+		delete: can(admin, 'delete', resource),
+	}])) as ResourcePermissionMap;
 }
 
 export function isActiveAdmin(admin: AdminSelf): boolean {
