@@ -6,6 +6,7 @@ export const RESOURCE_NAMES = [
 	'countries',
 	'universities',
 	'successstories',
+	'successvideos',
 	'blogposts',
 	'gallerys',
 	'partners',
@@ -242,6 +243,16 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
 		permission: 'successstories',
 		creatable: true,
 	},
+	successvideos: {
+		label: 'Success videos',
+		singular: 'Success video',
+		titleField: 'title',
+		subtitleField: 'countryName',
+		imageField: 'thumbnail',
+		reorderable: true,
+		permission: 'successvideos',
+		creatable: true,
+	},
 	blogposts: {
 		label: 'Blog posts',
 		singular: 'Blog post',
@@ -317,6 +328,7 @@ export const EDITOR_PAGES: EditorPage[] = [
 	{ label: 'Eligibility', path: '/eligibility', group: 'Student journey' },
 	{ label: 'University Finder', path: '/finder', group: 'Student journey' },
 	{ label: 'Success Stories', path: '/success-stories', group: 'Resources' },
+	{ label: 'Success Videos', path: '/success-videos', group: 'Resources' },
 	{ label: 'Blog', path: '/blog', group: 'Resources' },
 	{ label: 'FAQ', path: '/faq', group: 'Resources' },
 	{ label: 'Apply', path: '/apply', group: 'Resources' },
@@ -426,6 +438,11 @@ export type PageBlock =
 export type PageLayout = {
 	title: string;
 	prefix?: string;
+	// Slugs under `prefix` that should never surface via the extras catch-all
+	// below — a block deliberately removed from the page, not one Admin added
+	// unexpectedly. The Content row itself is left alone (still editable from
+	// All content library); it's just no longer part of this page's preview.
+	excludeSlugs?: string[];
 	blocks: PageBlock[];
 };
 
@@ -505,6 +522,14 @@ export const PAGE_LAYOUTS: Record<string, PageLayout> = {
 			{ type: 'content', slug: '/success-stories-cta' },
 		],
 	},
+	'/success-videos': {
+		title: 'Success Videos',
+		prefix: '/success-videos-',
+		blocks: [
+			{ type: 'hero', slug: '/success-videos-hero' },
+			{ type: 'collection', resource: 'successvideos', title: 'Visa Success Stories' },
+		],
+	},
 	'/blog': {
 		title: 'AGS Insights',
 		prefix: '/blog-',
@@ -525,16 +550,20 @@ export const PAGE_LAYOUTS: Record<string, PageLayout> = {
 	'/apply': {
 		title: 'Start Your Application',
 		prefix: '/apply-',
+		// The hero was removed from ApplyPage.tsx; keep it out of the extras
+		// catch-all rather than have it reappear as a generic block.
+		excludeSlugs: ['/apply-hero'],
 		blocks: [
-			{ type: 'hero', slug: '/apply-hero' },
 			{ type: 'form', slug: '/apply-form-panel' },
 		],
 	},
 	'/contact': {
 		title: 'Contact AGS',
 		prefix: '/contact-',
+		// The hero was removed from ContactPage.tsx; keep it out of the
+		// extras catch-all rather than have it reappear as a generic block.
+		excludeSlugs: ['/contact-hero'],
 		blocks: [
-			{ type: 'hero', slug: '/contact-hero' },
 			{ type: 'form', slug: '/contact-form-panel', infoSlug: '/contact-info' },
 		],
 	},

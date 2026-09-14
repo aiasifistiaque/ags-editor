@@ -1124,6 +1124,19 @@ function HomePreview(props: Props) {
 		<FinderTeaser record={bySlug('finder-teaser')} matches={bySlug('finder-teaser-matches')} selectionKey={currentSelection} onSelect={onSelectRecord} />
 		<VideoSection record={bySlug('video-section')} selectionKey={currentSelection} onSelect={onSelectRecord} />
 		<PhotoGallery record={bySlug('photo-gallery')} selectionKey={currentSelection} onSelect={onSelectRecord} />
+		<CollectionSection
+			resource='successvideos'
+			records={visibleRecords(data.successvideos).slice(0, 6)}
+			selectionKey={currentSelection}
+			onSelect={onSelectRecord}
+			onReorder={onReorder}
+			onCreate={onCreateRecord}
+			onOpenPriority={onOpenPriority}
+			canCreate={permissions.successvideos.create}
+			eyebrow={value(bySlug('success-videos'), 'content', 'Visa Success Stories')}
+			title={value(bySlug('success-videos'), 'name', 'Hear It From Our Students')}
+			subtitle='The six newest videos appear here. Click the heading block in All content to edit its wording.'
+		/>
 		<WhyAgs record={bySlug('why-ags')} selectionKey={currentSelection} onSelect={onSelectRecord} />
 		<CollectionSection
 			resource='successstories'
@@ -1197,9 +1210,15 @@ function StandardPagePreview(props: Props) {
 	};
 
 	// Anything else stored under this page's slug prefix still gets a section,
-	// so a block added in Admin never silently disappears from the editor.
+	// so a block added in Admin never silently disappears from the editor —
+	// except slugs explicitly excluded (a block deliberately removed from the
+	// page, not one Admin added unexpectedly).
+	const excluded = new Set(layout.excludeSlugs || []);
 	const extras = layout.prefix
-		? data.contents.filter((record) => String(record.slug || '').startsWith(layout.prefix as string) && !placed.has(String(record.slug)))
+		? data.contents.filter((record) => {
+			const slug = String(record.slug || '');
+			return slug.startsWith(layout.prefix as string) && !placed.has(slug) && !excluded.has(slug);
+		})
 		: [];
 
 	return <>
