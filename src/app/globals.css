@@ -180,8 +180,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .site-brand img, .site-logo-mark, .footer-logo img { width: 52px; height: 52px; flex: 0 0 auto; object-fit: contain; border-radius: 12px; }
 .site-logo-mark { display: grid; place-items: center; background: var(--primary); color: white; font-size: 12px; font-weight: 850; }
 .site-brand > span:last-child, .footer-logo > span:last-child { display: flex; min-width: 0; flex-direction: column; line-height: 1.05; }
-.site-brand strong, .footer-logo strong { font-family: Sora, Inter, sans-serif; font-size: 19px; letter-spacing: -.02em; }
-.site-brand small, .footer-logo small { margin-top: 5px; color: #a8a29e; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+.site-brand strong { font-family: Sora, Inter, sans-serif; font-size: 16px; font-weight: 700; letter-spacing: .02em; color: #1c1917; }
+.site-brand small { margin-top: 4px; color: #dc3b23; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.footer-logo strong { font-family: Sora, Inter, sans-serif; font-size: 19px; letter-spacing: -.02em; }
+.footer-logo small { margin-top: 5px; color: #a8a29e; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+.site-hamburger { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: #44403c; cursor: pointer; }
+.site-hamburger svg { width: 20px; height: 20px; }
+.site-hamburger:hover { background: #f5f5f4; }
 .logo-edit-target { flex: 0 1 auto; border-radius: 12px; }
 .topbar-edit-target::before { top: 3px; padding: 3px 6px; font-size: 9px; }
 .site-navbar nav { display: flex; align-items: center; justify-content: center; gap: 2px; min-width: 0; }

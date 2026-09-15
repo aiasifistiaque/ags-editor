@@ -185,8 +185,8 @@ function Editable({
 
 // ── icons (the frontend picks lucide icons by position) ──────────────
 
-const Icon = ({ path, className = '' }: { path: string; className?: string }) => (
-	<svg className={className} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
+const Icon = ({ path, className = '', strokeWidth = '2' }: { path: string; className?: string; strokeWidth?: string }) => (
+	<svg className={className} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth={strokeWidth} strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
 		{path.split('|').map((segment, index) => <path d={segment} key={index} />)}
 	</svg>
 );
@@ -196,6 +196,8 @@ const ARROW = 'M5 12h14m-6-6 6 6-6 6';
 const PIN = 'M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0|M12 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4';
 const CLOCK = 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20|M12 6v6l4 2';
 const PHONE = 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92';
+/** Slim 2-line mark, mirroring the frontend's mobile-menu hamburger — dummy here, the editor has no mobile nav to toggle. */
+const HAMBURGER = 'M3 7h18|M3 17h18';
 const STEP_ICONS = [
 	'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
 	'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2|M9 2h6v4H9z',
@@ -246,6 +248,9 @@ function SiteHeader({ data, selectionKey: currentSelection, onSelect }: Pick<Pro
 					))}
 				</nav>
 				<button type='button' className='site-cta dummy-link' title='Links are disabled inside the editor'>Apply Now</button>
+				<button type='button' className='site-hamburger dummy-link' title='Menu is disabled inside the editor' aria-label='Menu'>
+					<Icon path={HAMBURGER} strokeWidth='1.5' />
+				</button>
 			</div>
 		</header>
 	);
