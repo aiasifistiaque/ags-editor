@@ -332,6 +332,7 @@ export const EDITOR_PAGES: EditorPage[] = [
 	{ label: 'Blog', path: '/blog', group: 'Resources' },
 	{ label: 'FAQ', path: '/faq', group: 'Resources' },
 	{ label: 'Apply', path: '/apply', group: 'Resources' },
+	{ label: 'Application Submitted', path: '/application-submitted', group: 'Resources' },
 	{ label: 'Contact', path: '/contact', group: 'Resources' },
 	{ label: 'Privacy', path: '/privacy', group: 'Resources' },
 	{ label: 'Terms', path: '/terms', group: 'Resources' },
@@ -555,6 +556,17 @@ export const PAGE_LAYOUTS: Record<string, PageLayout> = {
 		excludeSlugs: ['/apply-hero'],
 		blocks: [
 			{ type: 'form', slug: '/apply-form-panel' },
+		],
+	},
+	// ApplicationSubmittedPage.tsx — where a real ApplyForm submission redirects
+	// to (see ags-frontend's applicationSubmittedToken.ts); not reachable by a
+	// bare URL visit on the real site, but still just a content page here.
+	'/application-submitted': {
+		title: 'Application Submitted',
+		prefix: '/application-submitted-',
+		blocks: [
+			{ type: 'hero', slug: '/application-submitted-hero' },
+			{ type: 'steps', slug: '/application-submitted-steps', title: 'What happens next?' },
 		],
 	},
 	'/contact': {
