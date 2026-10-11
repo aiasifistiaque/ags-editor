@@ -27,3 +27,9 @@ test('only sections that consume card images expose them', () => {
 	const result = drawerSchema('contents', { _id: 'x', slug: '/about-sister' }, schema);
 	assert.deepEqual(result.card.section.dataModel.map((field) => field.name), ['image', 'title', 'description']);
 });
+test('the team page exposes its hero and CTA copy, people stay Team records', () => {
+	const ctaSchema = { ...schema, section: { label: 'section' }, btnText: { label: 'btnText' }, url: { label: 'url' } };
+	for (const slug of ['/team-hero', '/team-chart']) assert.deepEqual(Object.keys(drawerSchema('contents', { _id: 'x', slug }, ctaSchema)), ['section', 'content', 'subContent']);
+	assert.deepEqual(Object.keys(drawerSchema('contents', { _id: 'x', slug: '/team-cta' }, ctaSchema)), ['content', 'subContent', 'btnText', 'url']);
+	assert.deepEqual(drawerSchema('teams', { _id: 'x' }, ctaSchema), {});
+});

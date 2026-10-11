@@ -321,6 +321,7 @@ export type EditorPage = {
 export const EDITOR_PAGES: EditorPage[] = [
 	{ label: 'Home', path: '/', group: 'Main pages' },
 	{ label: 'About', path: '/about', group: 'Main pages' },
+	{ label: 'Our Team', path: '/team', group: 'Main pages' },
 	{ label: 'Services', path: '/services', group: 'Main pages' },
 	{ label: 'Countries', path: '/countries', group: 'Student journey' },
 	{ label: 'Courses', path: '/courses', group: 'Student journey' },
@@ -461,6 +462,20 @@ export const PAGE_LAYOUTS: Record<string, PageLayout> = {
 			{ type: 'content', slug: '/about-offices' },
 			{ type: 'content', slug: '/about-sister' },
 			{ type: 'content', slug: '/about-cta' },
+		],
+	},
+	// TeamPage.tsx — hero, the organisational chart (its heading is
+	// `/team-chart`, its tier headings `/team-levels`; its people are Team
+	// records, tiered by Level Priority on the real page), then the CTA.
+	'/team': {
+		title: 'Our Team',
+		prefix: '/team-',
+		blocks: [
+			{ type: 'hero', slug: '/team-hero' },
+			{ type: 'content', slug: '/team-chart' },
+			{ type: 'content', slug: '/team-levels' },
+			{ type: 'collection', resource: 'teams', title: 'Team members' },
+			{ type: 'content', slug: '/team-cta' },
 		],
 	},
 	// ServicesPage.tsx — hero, the services list, the process block, CTA.

@@ -747,11 +747,21 @@ function RecordCard({ resource, record }: { resource: ResourceName; record: Edit
 		</div>;
 	}
 
-	if (resource === 'teams' || resource === 'partners') {
+	if (resource === 'teams') {
+		// The public card leads with role and department; the bio is profile-page only.
 		return <div className='record-card person-card'>
 			{image ? <img src={image} alt='' /> : <div className='story-avatar'>{recordLabel(resource, record).charAt(0)}</div>}
 			<h3>{recordLabel(resource, record)}</h3>
-			<p>{description || value(record, 'designation')}</p>
+			<p>{value(record, 'designation')}</p>
+			{value(record, 'department') && <p className='card-muted'>{value(record, 'department')}</p>}
+		</div>;
+	}
+
+	if (resource === 'partners') {
+		return <div className='record-card person-card'>
+			{image ? <img src={image} alt='' /> : <div className='story-avatar'>{recordLabel(resource, record).charAt(0)}</div>}
+			<h3>{recordLabel(resource, record)}</h3>
+			<p>{description}</p>
 		</div>;
 	}
 
